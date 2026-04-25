@@ -16,8 +16,10 @@
   "description": "AI Creator desktop app",
   "dependencies": {
     "electron": "^41.3.0",
+    "notistack": "^3.0.2",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
+    "sharp": "^0.34.5",
     "zod": "^4.3.6"
   },
   "devDependencies": {

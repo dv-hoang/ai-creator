@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useSnackbar } from "notistack";
 import type {
   AppSettings,
   AssetRecord,
@@ -48,6 +49,15 @@ const emptyProjectInput: ProjectInput = {
   artDirectionHint: "cinematic lighting",
 };
 
+function toRenderableSrc(filePath: string): string {
+  if (/^(https?:|file:|data:)/i.test(filePath)) {
+    return filePath;
+  }
+  const normalized = filePath.replaceAll("\\", "/");
+  const absolutePath = normalized.startsWith("/") ? normalized : `/${normalized}`;
+  return `file://${encodeURI(absolutePath)}`;
+}
+
 export function App() {
   const [electronApi, setElectronApi] = useState<typeof window.electronApi | null>(
     window.electronApi ?? null,
@@ -67,9 +77,19 @@ export function App() {
     useState<ProjectInput>(emptyProjectInput);
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
   const [untimedTranscript, setUntimedTranscript] = useState("");
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [lightboxImage, setLightboxImage] = useState<{
+    src: string;
+    alt: string;
+  } | null>(null);
+  const [generatingCharacterIds, setGeneratingCharacterIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [generatingSceneIds, setGeneratingSceneIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [settingsLoadError, setSettingsLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const { enqueueSnackbar } = useSnackbar();
 
   useEffect(() => {
     if (electronApi) {
@@ -95,11 +115,13 @@ export function App() {
   }, [electronApi]);
 
   async function refreshProjects() {
+    if (!electronApi) return;
     const next = await electronApi.projects.list();
     setProjects(next);
   }
 
   async function refreshSettings() {
+    if (!electronApi) return;
     try {
       const loadedSettings = await electronApi.settings.get();
       setSettings(loadedSettings);
@@ -110,11 +132,12 @@ export function App() {
           ? error.message
           : "Failed to load settings.";
       setSettingsLoadError(message);
-      setStatusMessage(`Settings load failed: ${message}`);
+      enqueueSnackbar(`Settings load failed: ${message}`, { variant: "error" });
     }
   }
 
   async function refreshWorkspace(projectId: string) {
+    if (!electronApi) return;
     const next = await electronApi.projects.getWorkspace(projectId);
     setWorkspace(next);
     const nextAssets = await electronApi.assets.listByProject(projectId);
@@ -139,10 +162,10 @@ export function App() {
           error instanceof Error
             ? error.message
             : "Failed to load projects.";
-        setStatusMessage(`Projects load failed: ${message}`);
+        enqueueSnackbar(`Projects load failed: ${message}`, { variant: "error" });
       }
     })();
-  }, [electronApi]);
+  }, [electronApi, enqueueSnackbar]);
 
   const assetsByEntity = useMemo(() => {
     const map = new Map<string, AssetRecord[]>();
@@ -156,22 +179,26 @@ export function App() {
   }, [assets]);
 
   async function handleSaveSettings() {
-    if (!settings) return;
+    if (!settings || !electronApi) return;
     setBusy(true);
     try {
       const saved = await electronApi.settings.save(settings);
       setSettings(saved);
       const openAiModels = saved.providerModels.openai?.length ?? 0;
       const geminiModels = saved.providerModels.gemini?.length ?? 0;
-      setStatusMessage(`Global app settings saved. Loaded models: OpenAI ${openAiModels}, Gemini ${geminiModels}.`);
+      enqueueSnackbar(
+        `Global app settings saved. Loaded models: OpenAI ${openAiModels}, Gemini ${geminiModels}.`,
+        { variant: "success" },
+      );
     } finally {
       setBusy(false);
     }
   }
 
   async function handleCreateProject() {
+    if (!electronApi) return;
     setBusy(true);
-    setStatusMessage("Creating project and running Step 1...");
+    enqueueSnackbar("Creating project...", { variant: "info" });
     try {
       const created = await electronApi.projects.create(projectForm);
       setWorkspace(created);
@@ -182,10 +209,14 @@ export function App() {
         created.project.id,
       );
       setAssets(nextAssets);
-      setStatusMessage("Project created and Step 1 completed.");
+      enqueueSnackbar(
+        "Project created. Step 1 generation is running in background.",
+        { variant: "success" },
+      );
     } catch (error) {
-      setStatusMessage(
+      enqueueSnackbar(
         error instanceof Error ? error.message : "Failed to create project",
+        { variant: "error" },
       );
     } finally {
       setBusy(false);
@@ -193,40 +224,87 @@ export function App() {
   }
 
   async function handleValidateProvider(provider: "openai" | "gemini") {
+    if (!electronApi) return;
     const apiKey = settings?.providerKeys[provider]?.trim() ?? "";
     const result = await electronApi.settings.validateProvider(provider, apiKey);
-    setStatusMessage(result.message);
+    enqueueSnackbar(result.message, {
+      variant: result.ok ? "success" : "error",
+    });
   }
 
   async function regenerateCharacterImage(character: Character) {
+    if (!electronApi) return;
+    if (generatingCharacterIds.has(character.id)) return;
     setBusy(true);
+    setGeneratingCharacterIds((previous) => {
+      const next = new Set(previous);
+      next.add(character.id);
+      return next;
+    });
     try {
       await electronApi.characters.generateImage(character.id);
       if (workspace) await refreshWorkspace(workspace.project.id);
-      setStatusMessage(`Generated image for ${character.name}`);
+      enqueueSnackbar(`Generated image for ${character.name}`, {
+        variant: "success",
+      });
+    } catch (error) {
+      enqueueSnackbar(
+        error instanceof Error
+          ? `Failed to generate image for ${character.name}: ${error.message}`
+          : `Failed to generate image for ${character.name}`,
+        { variant: "error" },
+      );
     } finally {
+      setGeneratingCharacterIds((previous) => {
+        const next = new Set(previous);
+        next.delete(character.id);
+        return next;
+      });
       setBusy(false);
     }
   }
 
   async function regenerateSceneImage(scene: Scene) {
+    if (!electronApi) return;
+    if (generatingSceneIds.has(scene.id)) return;
     setBusy(true);
+    setGeneratingSceneIds((previous) => {
+      const next = new Set(previous);
+      next.add(scene.id);
+      return next;
+    });
     try {
       await electronApi.scenes.generateImage(scene.id);
       if (workspace) await refreshWorkspace(workspace.project.id);
-      setStatusMessage(`Generated image for scene ${scene.sceneIndex}`);
+      enqueueSnackbar(`Generated image for scene ${scene.sceneIndex}`, {
+        variant: "success",
+      });
+    } catch (error) {
+      enqueueSnackbar(
+        error instanceof Error
+          ? `Failed to generate image for scene ${scene.sceneIndex}: ${error.message}`
+          : `Failed to generate image for scene ${scene.sceneIndex}`,
+        { variant: "error" },
+      );
     } finally {
+      setGeneratingSceneIds((previous) => {
+        const next = new Set(previous);
+        next.delete(scene.id);
+        return next;
+      });
       setBusy(false);
     }
   }
 
   async function generateSceneVideo(scene: Scene) {
+    if (!electronApi) return;
     const imageAsset = (assetsByEntity.get(`scene:${scene.id}`) ?? []).find(
       (asset) => asset.kind === "image",
     );
     if (!imageAsset) {
-      setStatusMessage(
+      enqueueSnackbar(
         "Generate or link a scene image before creating a video.",
+        { variant: "warning" },
       );
       return;
     }
@@ -235,19 +313,24 @@ export function App() {
     try {
       await electronApi.scenes.generateVideo(scene.id, imageAsset.id);
       if (workspace) await refreshWorkspace(workspace.project.id);
-      setStatusMessage(`Generated video for scene ${scene.sceneIndex}`);
+      enqueueSnackbar(`Generated video for scene ${scene.sceneIndex}`, {
+        variant: "success",
+      });
+    } catch (error) {
+      enqueueSnackbar(
+        error instanceof Error
+          ? `Failed to generate video for scene ${scene.sceneIndex}: ${error.message}`
+          : `Failed to generate video for scene ${scene.sceneIndex}`,
+        { variant: "error" },
+      );
     } finally {
       setBusy(false);
     }
   }
 
   async function updateCharacterPrompt(character: Character, prompt: string) {
+    if (!electronApi) return;
     await electronApi.characters.updatePrompt(character.id, prompt);
-    if (workspace) await refreshWorkspace(workspace.project.id);
-  }
-
-  async function linkCharacterAsset(character: Character, assetId: string) {
-    await electronApi.characters.linkAsset(character.id, assetId);
     if (workspace) await refreshWorkspace(workspace.project.id);
   }
 
@@ -256,6 +339,7 @@ export function App() {
     nextTextToImage: string,
     nextImageToVideo: string,
   ) {
+    if (!electronApi) return;
     await electronApi.scenes.updatePrompts(scene.id, {
       textToImage: nextTextToImage,
       imageToVideo: nextImageToVideo,
@@ -264,20 +348,33 @@ export function App() {
   }
 
   async function downloadSelected() {
-    if (!workspace || selectedAssetIds.length === 0) return;
+    if (!electronApi || !workspace || selectedAssetIds.length === 0) return;
     const location = await electronApi.assets.download(
       workspace.project.id,
       selectedAssetIds,
     );
-    setStatusMessage(`Saved selected assets to ${location}`);
+    if (!location) {
+      enqueueSnackbar("Download cancelled.", { variant: "info" });
+      return;
+    }
+    enqueueSnackbar(`Saved selected assets to ${location}`, { variant: "success" });
   }
 
   async function exportSrt() {
-    if (!workspace) return;
+    if (!electronApi || !workspace) return;
     const filePath = await electronApi.transcript.exportSrt(
       workspace.project.id,
     );
-    setStatusMessage(`SRT exported: ${filePath}`);
+    if (!filePath) {
+      enqueueSnackbar("SRT export cancelled.", { variant: "info" });
+      return;
+    }
+    enqueueSnackbar(`SRT exported: ${filePath}`, { variant: "success" });
+  }
+
+  async function copyPromptToClipboard(label: string, value: string) {
+    await navigator.clipboard.writeText(value);
+    enqueueSnackbar(`${label} copied to clipboard.`, { variant: "success" });
   }
 
   function updateTaskMapping(
@@ -295,6 +392,28 @@ export function App() {
         },
       },
     });
+  }
+
+  function handleOpenCreateProject() {
+    if (!settings) {
+      enqueueSnackbar("Settings are not loaded yet.", { variant: "warning" });
+      return;
+    }
+
+    const scriptMapping = settings.taskModelMappings.generateScript;
+    const provider = scriptMapping?.provider;
+    const model = scriptMapping?.model?.trim();
+    const providerKey = provider ? settings.providerKeys[provider]?.trim() : "";
+
+    if (!provider || !model || !providerKey) {
+      enqueueSnackbar(
+        'Cannot create project: please configure "Generate Script" provider/model and API key in Settings.',
+        { variant: "error" },
+      );
+      return;
+    }
+
+    setShowCreateProject(true);
   }
 
   if (!electronApi) {
@@ -331,7 +450,10 @@ export function App() {
         <div className="nav-stack">
           <button
             className={`btn ${activePage === "workspace" ? "active" : ""}`}
-            onClick={() => setActivePage("workspace")}
+            onClick={() => {
+              setActivePage("workspace");
+              setWorkspace(null);
+            }}
           >
             Workspace
           </button>
@@ -340,31 +462,10 @@ export function App() {
         <div className="sidebar-actions">
           <button
             className="btn btn-primary"
-            onClick={() => setShowCreateProject(true)}
+            onClick={handleOpenCreateProject}
           >
             + New Project
           </button>
-        </div>
-
-        <div className="section-head">
-          <h3>Projects</h3>
-          <span>{projects.length}</span>
-        </div>
-
-        <div className="project-grid">
-          {projects.map((project) => (
-            <button
-              key={project.id}
-              className="project-card"
-              onClick={() => void refreshWorkspace(project.id)}
-            >
-              <h3>{project.title}</h3>
-              <p>{project.visualStyle}</p>
-              <small>
-                {project.aspectRatio} • {project.status}
-              </small>
-            </button>
-          ))}
         </div>
 
         <div className="sidebar-bottom">
@@ -537,12 +638,29 @@ export function App() {
         )}
 
         {activePage === "workspace" && !workspace && (
-          <section className="workspace panel">
-            <h2>No project selected</h2>
+          <section className="workspace panel workspace-projects">
+            <div className="section-head">
+              <h2>Projects</h2>
+              <span className="pill">{projects.length}</span>
+            </div>
             <p className="muted">
-              Select an existing project from the sidebar or create a new one to
-              open Characters, Scenes, and Transcript tabs.
+              Select a project to open Characters, Scenes, and Transcript tabs.
             </p>
+            <div className="workspace-project-grid">
+              {projects.map((project) => (
+                <button
+                  key={project.id}
+                  className="project-card"
+                  onClick={() => void refreshWorkspace(project.id)}
+                >
+                  <h3>{project.title}</h3>
+                  <p>{project.visualStyle}</p>
+                  <small>
+                    {project.aspectRatio} • {project.status}
+                  </small>
+                </button>
+              ))}
+            </div>
           </section>
         )}
 
@@ -737,9 +855,11 @@ export function App() {
             {selectedTab === "Characters" && (
               <CharactersView
                 characters={workspace.characters}
-                allAssets={assets}
                 assetsByEntity={assetsByEntity}
+                generatingCharacterIds={generatingCharacterIds}
                 selectedAssetIds={selectedAssetIds}
+                onOpenLightbox={(src, alt) => setLightboxImage({ src, alt })}
+                onUpdatePrompt={updateCharacterPrompt}
                 onToggleAsset={(assetId) =>
                   setSelectedAssetIds((previous) =>
                     previous.includes(assetId)
@@ -748,8 +868,9 @@ export function App() {
                   )
                 }
                 onGenerateImage={regenerateCharacterImage}
-                onUpdatePrompt={updateCharacterPrompt}
-                onLinkAsset={linkCharacterAsset}
+                onCopyPrompt={(character, prompt) =>
+                  void copyPromptToClipboard(`${character.name} prompt`, prompt)
+                }
               />
             )}
 
@@ -757,7 +878,9 @@ export function App() {
               <ScenesView
                 scenes={workspace.scenes}
                 assetsByEntity={assetsByEntity}
+                generatingSceneIds={generatingSceneIds}
                 selectedAssetIds={selectedAssetIds}
+                onOpenLightbox={(src, alt) => setLightboxImage({ src, alt })}
                 onToggleAsset={(assetId) =>
                   setSelectedAssetIds((previous) =>
                     previous.includes(assetId)
@@ -768,6 +891,18 @@ export function App() {
                 onGenerateImage={regenerateSceneImage}
                 onGenerateVideo={generateSceneVideo}
                 onUpdatePrompts={updateScenePrompts}
+                onCopyTextPrompt={(scene, prompt) =>
+                  void copyPromptToClipboard(
+                    `Scene ${scene.sceneIndex} text-to-image prompt`,
+                    prompt,
+                  )
+                }
+                onCopyVideoPrompt={(scene, prompt) =>
+                  void copyPromptToClipboard(
+                    `Scene ${scene.sceneIndex} image-to-video prompt`,
+                    prompt,
+                  )
+                }
               />
             )}
 
@@ -781,9 +916,28 @@ export function App() {
           </section>
         )}
 
-        {statusMessage && (
-          <footer className="status-message">{statusMessage}</footer>
+        {lightboxImage && (
+          <section
+            className="lightbox"
+            onClick={() => setLightboxImage(null)}
+          >
+            <button
+              className="lightbox-close"
+              type="button"
+              onClick={() => setLightboxImage(null)}
+              aria-label="Close image preview"
+            >
+              ✕
+            </button>
+            <img
+              src={lightboxImage.src}
+              alt={lightboxImage.alt}
+              className="lightbox-image"
+              onClick={(event) => event.stopPropagation()}
+            />
+          </section>
         )}
+
       </main>
     </div>
   );
@@ -791,68 +945,80 @@ export function App() {
 
 function CharactersView(props: {
   characters: Character[];
-  allAssets: AssetRecord[];
   assetsByEntity: Map<string, AssetRecord[]>;
+  generatingCharacterIds: Set<string>;
   selectedAssetIds: string[];
+  onOpenLightbox: (src: string, alt: string) => void;
+  onUpdatePrompt: (character: Character, prompt: string) => void;
   onToggleAsset: (assetId: string) => void;
   onGenerateImage: (character: Character) => void;
-  onUpdatePrompt: (character: Character, prompt: string) => void;
-  onLinkAsset: (character: Character, assetId: string) => void;
+  onCopyPrompt: (character: Character, prompt: string) => void;
 }) {
   return (
     <div className="entity-grid">
       {props.characters.map((character) => {
-        const assets =
-          props.assetsByEntity.get(`character:${character.id}`) ?? [];
         const prompt = character.promptOverride ?? character.promptTextToImage;
+        const imageAsset = (props.assetsByEntity.get(`character:${character.id}`) ?? []).find(
+          (asset) => asset.kind === "image",
+        );
 
         return (
           <article key={character.id} className="entity-card panel-subtle">
-            <h3>{character.name}</h3>
-            <p>{character.description}</p>
-            <textarea
-              rows={4}
-              value={prompt}
-              onChange={(event) =>
-                void props.onUpdatePrompt(character, event.target.value)
-              }
-              placeholder="Character text-to-image prompt"
-            />
-            <div className="inline-row">
-              <button
-                className="btn"
-                onClick={() => void props.onGenerateImage(character)}
-              >
-                Generate Image
-              </button>
-              <select
-                value={character.linkedAssetId ?? ""}
-                onChange={(event) =>
-                  void props.onLinkAsset(character, event.target.value)
-                }
-              >
-                <option value="">Link existing image</option>
-                {props.allAssets
-                  .filter((asset) => asset.kind === "image")
-                  .map((asset) => (
-                    <option key={asset.id} value={asset.id}>
-                      {asset.projectId.slice(0, 8)} / {asset.entityType} /{" "}
-                      {asset.id.slice(0, 8)}
-                    </option>
-                  ))}
-              </select>
-            </div>
-            <div className="asset-list">
-              {assets.map((asset) => (
-                <label key={asset.id}>
-                  <input
-                    type="checkbox"
-                    checked={props.selectedAssetIds.includes(asset.id)}
-                    onChange={() => props.onToggleAsset(asset.id)}
-                  />
-                  {asset.kind} - {asset.model}
-                </label>
-              ))}
+            <h3>{character.name} Prompt</h3>
+            <div className="character-layout">
+              <div className="character-preview">
+                {imageAsset ? (
+                  <>
+                    <img
+                      src={toRenderableSrc(imageAsset.filePath)}
+                      alt={`${character.name} generated`}
+                      className="media-thumb character-thumb"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        props.onOpenLightbox(
+                          toRenderableSrc(imageAsset.filePath),
+                          `${character.name} generated`,
+                        );
+                      }}
+                    />
+                    <label className="media-meta">
+                      <input
+                        type="checkbox"
+                        checked={props.selectedAssetIds.includes(imageAsset.id)}
+                        onChange={() => props.onToggleAsset(imageAsset.id)}
+                      />
+                      image • {imageAsset.model}
+                    </label>
+                  </>
+                ) : (
+                  <div className="character-placeholder">
+                    No generated image yet
+                  </div>
+                )}
+              </div>
+              <div className="character-editor">
+                <HoverCopyTextarea
+                  rows={6}
+                  value={prompt}
+                  onChange={(nextValue) =>
+                    void props.onUpdatePrompt(character, nextValue)
+                  }
+                  onCopy={() => void props.onCopyPrompt(character, prompt)}
+                  placeholder="Character text-to-image prompt"
+                />
+                <div className="inline-row">
+                  <button
+                    className="btn"
+                    onClick={() => void props.onGenerateImage(character)}
+                    disabled={props.generatingCharacterIds.has(character.id)}
+                  >
+                    {props.generatingCharacterIds.has(character.id)
+                      ? "Generating..."
+                      : "Generate Image"}
+                  </button>
+                </div>
+              </div>
             </div>
           </article>
         );
@@ -864,7 +1030,9 @@ function CharactersView(props: {
 function ScenesView(props: {
   scenes: Scene[];
   assetsByEntity: Map<string, AssetRecord[]>;
+  generatingSceneIds: Set<string>;
   selectedAssetIds: string[];
+  onOpenLightbox: (src: string, alt: string) => void;
   onToggleAsset: (assetId: string) => void;
   onGenerateImage: (scene: Scene) => void;
   onGenerateVideo: (scene: Scene) => void;
@@ -873,12 +1041,18 @@ function ScenesView(props: {
     nextTextToImage: string,
     nextImageToVideo: string,
   ) => void;
+  onCopyTextPrompt: (scene: Scene, prompt: string) => void;
+  onCopyVideoPrompt: (scene: Scene, prompt: string) => void;
 }) {
   return (
     <div className="entity-grid">
       {props.scenes.map((scene) => {
-        const assets = props.assetsByEntity.get(`scene:${scene.id}`) ?? [];
-        const videos = props.assetsByEntity.get(`video:${scene.id}`) ?? [];
+        const assets = (props.assetsByEntity.get(`scene:${scene.id}`) ?? []).filter(
+          (asset) => asset.kind === "image",
+        );
+        const videos = (props.assetsByEntity.get(`video:${scene.id}`) ?? []).filter(
+          (asset) => asset.kind === "video",
+        );
         const textPrompt =
           scene.promptOverrideTextToImage ?? scene.promptTextToImage;
         const videoPrompt =
@@ -889,68 +1063,155 @@ function ScenesView(props: {
             <h3>
               Scene {scene.sceneIndex}: {scene.title}
             </h3>
-            <p>{scene.summary}</p>
-            <small>
-              Needs refs: {scene.requiredCharacterRefs.join(", ") || "None"}
-            </small>
-            <label>
-              Text to image prompt
-              <textarea
-                rows={4}
-                value={textPrompt}
-                onChange={(event) =>
-                  void props.onUpdatePrompts(
-                    scene,
-                    event.target.value,
-                    videoPrompt,
-                  )
-                }
-              />
-            </label>
-            <label>
-              Image to video prompt
-              <textarea
-                rows={4}
-                value={videoPrompt}
-                onChange={(event) =>
-                  void props.onUpdatePrompts(
-                    scene,
-                    textPrompt,
-                    event.target.value,
-                  )
-                }
-              />
-            </label>
-            <div className="inline-row">
-              <button
-                className="btn"
-                onClick={() => void props.onGenerateImage(scene)}
-              >
-                Generate Scene Image
-              </button>
-              <button
-                className="btn"
-                onClick={() => void props.onGenerateVideo(scene)}
-              >
-                Generate Video
-              </button>
-            </div>
-
-            <div className="asset-list">
-              {[...assets, ...videos].map((asset) => (
-                <label key={asset.id}>
-                  <input
-                    type="checkbox"
-                    checked={props.selectedAssetIds.includes(asset.id)}
-                    onChange={() => props.onToggleAsset(asset.id)}
+            <div className="scene-layout">
+              <div className="scene-preview">
+                {assets[0] ? (
+                  <label className="media-card">
+                    <img
+                      src={toRenderableSrc(assets[0].filePath)}
+                      alt={`Scene ${scene.sceneIndex} generated`}
+                      className="media-thumb"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        props.onOpenLightbox(
+                          toRenderableSrc(assets[0].filePath),
+                          `Scene ${scene.sceneIndex} generated`,
+                        );
+                      }}
+                    />
+                    <span className="media-meta">
+                      <input
+                        type="checkbox"
+                        checked={props.selectedAssetIds.includes(assets[0].id)}
+                        onChange={() => props.onToggleAsset(assets[0].id)}
+                      />
+                      image • {assets[0].model}
+                    </span>
+                  </label>
+                ) : (
+                  <div className="scene-placeholder">
+                    No generated scene image yet
+                  </div>
+                )}
+                {videos[0] && (
+                  <label className="media-card">
+                    <video
+                      src={toRenderableSrc(videos[0].filePath)}
+                      className="media-thumb"
+                      controls
+                      preload="metadata"
+                    />
+                    <span className="media-meta">
+                      <input
+                        type="checkbox"
+                        checked={props.selectedAssetIds.includes(videos[0].id)}
+                        onChange={() => props.onToggleAsset(videos[0].id)}
+                      />
+                      video • {videos[0].model}
+                    </span>
+                  </label>
+                )}
+              </div>
+              <div className="scene-editor">
+                <p>{scene.summary}</p>
+                <div className="refs-highlight">
+                  <strong>Needs refs</strong>
+                  <div className="refs-list">
+                    {scene.requiredCharacterRefs.length > 0 ? (
+                      scene.requiredCharacterRefs.map((refName) => (
+                        <span key={`${scene.id}-${refName}`} className="ref-chip">
+                          {refName}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="ref-chip ref-chip-empty">None</span>
+                    )}
+                  </div>
+                </div>
+                <label>
+                  Text to image prompt
+                  <HoverCopyTextarea
+                    rows={4}
+                    value={textPrompt}
+                    onChange={(nextValue) =>
+                      void props.onUpdatePrompts(
+                        scene,
+                        nextValue,
+                        videoPrompt,
+                      )
+                    }
+                    onCopy={() => void props.onCopyTextPrompt(scene, textPrompt)}
                   />
-                  {asset.kind} - {asset.model}
                 </label>
-              ))}
+                <label>
+                  Image to video prompt
+                  <HoverCopyTextarea
+                    rows={4}
+                    value={videoPrompt}
+                    onChange={(nextValue) =>
+                      void props.onUpdatePrompts(
+                        scene,
+                        textPrompt,
+                        nextValue,
+                      )
+                    }
+                    onCopy={() => void props.onCopyVideoPrompt(scene, videoPrompt)}
+                  />
+                </label>
+                <div className="inline-row">
+                  <button
+                    className="btn"
+                    onClick={() => void props.onGenerateImage(scene)}
+                    disabled={props.generatingSceneIds.has(scene.id)}
+                  >
+                    {props.generatingSceneIds.has(scene.id)
+                      ? "Generating..."
+                      : "Generate Scene Image"}
+                  </button>
+                  <button
+                    className="btn"
+                    onClick={() => void props.onGenerateVideo(scene)}
+                  >
+                    Generate Video
+                  </button>
+                </div>
+              </div>
             </div>
           </article>
         );
       })}
+    </div>
+  );
+}
+
+function HoverCopyTextarea(props: {
+  value: string;
+  rows: number;
+  onChange: (value: string) => void;
+  onCopy: () => void;
+  placeholder?: string;
+}) {
+  return (
+    <div className="textarea-copy-wrap">
+      <textarea
+        rows={props.rows}
+        value={props.value}
+        onChange={(event) => props.onChange(event.target.value)}
+        placeholder={props.placeholder}
+      />
+      <button
+        type="button"
+        className="copy-icon-btn"
+        onClick={props.onCopy}
+        aria-label="Copy to clipboard"
+        title="Copy to clipboard"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M9 9h11v11H9z" />
+          <path d="M4 4h11v2H6v9H4z" />
+        </svg>
+      </button>
     </div>
   );
 }

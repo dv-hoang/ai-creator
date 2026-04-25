@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron';
+import { dialog, ipcMain } from 'electron';
 import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -94,6 +94,49 @@ function activeScenePrompts(scene: Scene): { textToImage: string; imageToVideo: 
   };
 }
 
+function resolveSceneCharacterReferencePaths(scene: Scene): string[] {
+  const requiredNames = new Set(scene.requiredCharacterRefs);
+  if (requiredNames.size === 0) {
+    return [];
+  }
+
+  const projectAssets = getAssetsByProject(scene.projectId);
+  const byCharacterId = new Map<string, Array<(typeof projectAssets)[number]>>();
+  for (const asset of projectAssets) {
+    if (asset.entityType !== 'character' || asset.kind !== 'image') {
+      continue;
+    }
+    const bucket = byCharacterId.get(asset.entityId) ?? [];
+    bucket.push(asset);
+    byCharacterId.set(asset.entityId, bucket);
+  }
+
+  const references = new Set<string>();
+  for (const character of getCharactersByProject(scene.projectId)) {
+    if (!requiredNames.has(character.name)) {
+      continue;
+    }
+
+    if (character.linkedAssetId) {
+      try {
+        references.add(getAsset(character.linkedAssetId).filePath);
+        continue;
+      } catch {
+        // Fallback to the latest generated character image when linked asset is missing.
+      }
+    }
+
+    const generatedImages = byCharacterId.get(character.id) ?? [];
+    if (generatedImages.length === 0) {
+      continue;
+    }
+    generatedImages.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    references.add(generatedImages[0].filePath);
+  }
+
+  return [...references];
+}
+
 function withProjectContext(
   basePrompt: string,
   options: { aspectRatio: string; visualStyle: string; artDirectionHint: string }
@@ -152,20 +195,20 @@ export function registerIpc(): void {
   bind('projects:getWorkspace', (projectId) => getWorkspace(projectId));
   bind('projects:create', async (input: ProjectInput) => {
     const project = createProject(input);
-
-    try {
-      const prompt = renderAnimationPrompt(input);
-      const response = await generateStep1(prompt);
-      saveStep1Output(project.id, JSON.stringify(response), JSON.stringify(response));
-      const normalized = normalizeStep1(project.id, response);
-      saveCharacters(normalized.characters);
-      saveScenes(normalized.scenes);
-      saveTranscripts(normalized.transcripts);
-      updateProjectStatus(project.id, 'ready');
-    } catch (error) {
-      updateProjectStatus(project.id, 'error');
-      throw error;
-    }
+    void (async () => {
+      try {
+        const prompt = renderAnimationPrompt(input);
+        const response = await generateStep1(prompt);
+        saveStep1Output(project.id, JSON.stringify(response), JSON.stringify(response));
+        const normalized = normalizeStep1(project.id, response);
+        saveCharacters(normalized.characters);
+        saveScenes(normalized.scenes);
+        saveTranscripts(normalized.transcripts);
+        updateProjectStatus(project.id, 'ready');
+      } catch {
+        updateProjectStatus(project.id, 'error');
+      }
+    })();
 
     return getWorkspace(project.id);
   });
@@ -209,11 +252,7 @@ export function registerIpc(): void {
       throw new Error('Scene not found');
     }
     const project = getProject(scene.projectId);
-
-    const characterReferences = getCharactersByProject(scene.projectId)
-      .filter((character) => scene.requiredCharacterRefs.includes(character.name) && character.linkedAssetId)
-      .map((character) => character.linkedAssetId as string)
-      .map((assetId) => getAsset(assetId).filePath);
+    const characterReferences = resolveSceneCharacterReferencePaths(scene);
 
     const generated = await generateImage({
       projectId: scene.projectId,
@@ -275,20 +314,47 @@ export function registerIpc(): void {
 
   bind('assets:listByProject', (projectId: string) => getAssetsByProject(projectId));
   bind('assets:download', (projectId: string, assetIds: string[]) => {
-    const projectDir = getProjectAssetsDir(projectId);
-    const downloadDir = join(projectDir, 'downloads', String(Date.now()));
+    const project = getProject(projectId);
+    return dialog
+      .showOpenDialog({
+        title: 'Select Download Folder',
+        defaultPath: getProjectAssetsDir(projectId),
+        properties: ['openDirectory', 'createDirectory', 'promptToCreate']
+      })
+      .then((selection) => {
+        if (selection.canceled || selection.filePaths.length === 0) {
+          return '';
+        }
+
+        const safeProjectTitle = project.title.replaceAll(/[^a-zA-Z0-9-_]/g, '_') || 'project';
+        const downloadDir = join(selection.filePaths[0], `${safeProjectTitle}-assets-${Date.now()}`);
     mkdirSync(downloadDir, { recursive: true });
 
-    const rows = assetIds.map((assetId) => getAsset(assetId));
-    rows.forEach((asset) => {
-      copyFileSync(asset.filePath, join(downloadDir, basename(asset.filePath)));
-    });
+        const rows = assetIds.map((assetId) => getAsset(assetId));
+        rows.forEach((asset) => {
+          copyFileSync(asset.filePath, join(downloadDir, basename(asset.filePath)));
+        });
 
-    const manifest = join(downloadDir, 'manifest.txt');
-    writeFileSync(manifest, rows.map((row) => `${row.kind}: ${row.filePath}`).join('\n'));
-    return downloadDir;
+        const manifest = join(downloadDir, 'manifest.txt');
+        writeFileSync(manifest, rows.map((row) => `${row.kind}: ${row.filePath}`).join('\n'));
+        return downloadDir;
+      });
   });
 
   bind('transcript:untimedText', (projectId: string) => buildUntimedTranscript(projectId));
-  bind('transcript:exportSrt', (projectId: string) => exportSrt(projectId));
+  bind('transcript:exportSrt', async (projectId: string) => {
+    const project = getProject(projectId);
+    const suggestedName = `${project.title.replaceAll(/[^a-zA-Z0-9-_]/g, '_') || 'transcript'}.srt`;
+    const saveResult = await dialog.showSaveDialog({
+      title: 'Export SRT',
+      defaultPath: join(getProjectAssetsDir(projectId), suggestedName),
+      filters: [{ name: 'SubRip Subtitle', extensions: ['srt'] }]
+    });
+
+    if (saveResult.canceled || !saveResult.filePath) {
+      return '';
+    }
+
+    return exportSrt(projectId, saveResult.filePath);
+  });
 }

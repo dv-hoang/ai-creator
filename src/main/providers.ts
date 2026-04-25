@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { copyFileSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { copyFileSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { basename, extname, join } from 'node:path';
+import sharp from 'sharp';
 import type { AppSettings, GenerationTask, ProviderName, Step1Response, ValidateProviderResult } from '@shared/types';
 import { getAsset, getProjectAssetsDir, getSettings } from './db';
 import { step1Schema } from './schemas';
@@ -80,6 +81,15 @@ function pickImageExtension(contentType: string | null, fallback = 'png'): strin
   return fallback;
 }
 
+function mimeTypeFromImagePath(filePath: string): string {
+  const extension = extname(filePath).toLowerCase();
+  if (extension === '.jpg' || extension === '.jpeg') return 'image/jpeg';
+  if (extension === '.webp') return 'image/webp';
+  if (extension === '.gif') return 'image/gif';
+  if (extension === '.bmp') return 'image/bmp';
+  return 'image/png';
+}
+
 async function downloadToFile(url: string, outputPathWithoutExt: string): Promise<string> {
   const res = await fetch(url);
   await ensureOk(res, 'Asset download');
@@ -88,6 +98,52 @@ async function downloadToFile(url: string, outputPathWithoutExt: string): Promis
   const filePath = `${outputPathWithoutExt}.${extension}`;
   writeFileSync(filePath, bytes);
   return filePath;
+}
+
+async function archiveAndCompressGeneratedImage(
+  filePath: string,
+  projectAssetsDir: string
+): Promise<{ filePath: string; metadata: Record<string, unknown> }> {
+  const extension = filePath.split('.').pop()?.toLowerCase() ?? '';
+  if (!['png', 'jpg', 'jpeg', 'webp'].includes(extension)) {
+    return { filePath, metadata: { compressed: false, reason: 'unsupported_format' } };
+  }
+
+  const originDir = join(projectAssetsDir, 'origin');
+  const compressedDir = join(projectAssetsDir, 'compressed');
+  mkdirSync(originDir, { recursive: true });
+  mkdirSync(compressedDir, { recursive: true });
+
+  const originalBaseName = basename(filePath);
+  const baseNameWithoutExt = basename(filePath, extname(filePath));
+  const archivedOriginalPath = join(originDir, originalBaseName);
+  const compressedPath = join(compressedDir, `${baseNameWithoutExt}.webp`);
+  const beforeBytes = statSync(filePath).size;
+  const tempPath = `${compressedPath}.tmp`;
+
+  await sharp(filePath)
+    .rotate()
+    .resize({ width: 1536, withoutEnlargement: true })
+    .webp({ quality: 80, effort: 6 })
+    .toFile(tempPath);
+
+  renameSync(filePath, archivedOriginalPath);
+  renameSync(tempPath, compressedPath);
+
+  const afterBytes = statSync(compressedPath).size;
+  return {
+    filePath: compressedPath,
+    metadata: {
+      compressed: true,
+      sourceFormat: extension,
+      targetFormat: 'webp',
+      beforeBytes,
+      afterBytes,
+      reductionPercent: beforeBytes > 0 ? Number((((beforeBytes - afterBytes) / beforeBytes) * 100).toFixed(2)) : 0,
+      archivedOriginalPath,
+      compressedPath
+    }
+  };
 }
 
 async function openAiGenerateImage(
@@ -141,14 +197,26 @@ async function geminiGenerateImage(
   model: string,
   prompt: string,
   apiKey: string,
-  outputPathWithoutExt: string
+  outputPathWithoutExt: string,
+  referenceImagePaths: string[] = []
 ): Promise<{ filePath: string; metadata: Record<string, unknown> }> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const requestParts: Array<Record<string, unknown>> = [{ text: prompt }];
+  for (const imagePath of referenceImagePaths) {
+    const imageBytes = readFileSync(imagePath);
+    requestParts.push({
+      inlineData: {
+        mimeType: mimeTypeFromImagePath(imagePath),
+        data: imageBytes.toString('base64')
+      }
+    });
+  }
+
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }]
+      contents: [{ parts: requestParts }]
     })
   });
   await ensureOk(res, 'Gemini image generation');
@@ -389,16 +457,24 @@ export async function generateImage(options: {
   const generated =
     mapping.provider === 'openai'
       ? await openAiGenerateImage(mapping.model, options.prompt, key, outputPathWithoutExt)
-      : await geminiGenerateImage(mapping.model, options.prompt, key, outputPathWithoutExt);
+      : await geminiGenerateImage(
+          mapping.model,
+          options.prompt,
+          key,
+          outputPathWithoutExt,
+          options.references ?? []
+        );
+  const compressed = await archiveAndCompressGeneratedImage(generated.filePath, outputDir);
 
   return {
     provider: mapping.provider,
     model: mapping.model,
-    filePath: generated.filePath,
+    filePath: compressed.filePath,
     metadataJson: JSON.stringify({
       prompt: options.prompt,
       references: options.references ?? [],
-      providerMetadata: generated.metadata
+      providerMetadata: generated.metadata,
+      compression: compressed.metadata
     })
   };
 }

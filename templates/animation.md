@@ -32,6 +32,12 @@ You are a professional Animation Director and AI Prompt Engineer. Your task is t
 
 **STEP 1: CHARACTER DESIGN BIBLE**
 Design each character with highly specific, repeatable visual traits (hair color, exact clothing, body type) locked to the {VISUAL_STYLE}. This prevents identity drift across scenes.
+For each character `prompt`, write it as a **reference-sheet prompt** (single long prompt string) that includes:
+- **Identity lock:** face, body proportions, age range, hairstyle, outfit layers, color palette, accessories, materials.
+- **Multi-motion set:** at least 6 distinct actions (idle, walk/run, turn, reach/use prop, emotional reaction, dynamic movement).
+- **Multi-angle / degree coverage:** explicit angles such as front (0deg), 3/4 (45deg), side (90deg), back (180deg), high angle, low angle.
+- **Expression range:** at least 5 facial/emotional states that still preserve identity.
+- **Style and render constraints:** consistent {VISUAL_STYLE}, {ART_DIRECTION_HINT}, lighting logic, and no identity morphing.
 
 **STEP 2: SCRIPT & TRANSCRIPT PACING**
 Break the narrative into a full 3-act structure. Map the dialogue/narration to the visual beats. Set `start_sec` and `end_sec` to `0` on each transcript row — the pipeline assigns segment lengths from each scene’s `clip_duration_sec` so SubRip/TTS slots match I2V clip timing.
@@ -67,7 +73,7 @@ Your entire response must be formatted exactly to this JSON structure:
   "characters": [
     {
       "name": "Character Name",
-      "prompt": "Detailed physical description, exact wardrobe, style lock..."
+      "prompt": "Reference sheet prompt with identity lock, multi-action motion set, multi-angle (0deg/45deg/90deg/180deg + high/low), expression range, and strict style lock..."
     }
   ],
   "transcript": [

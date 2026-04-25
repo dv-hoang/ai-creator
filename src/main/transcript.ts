@@ -8,7 +8,7 @@ export function buildUntimedTranscript(projectId: string): string {
   return transcripts.map((row) => `${row.speaker}: ${row.text}`).join('\n');
 }
 
-export function exportSrt(projectId: string): string {
+export function exportSrt(projectId: string, outputPath?: string): string {
   const transcripts = getTranscriptsByProject(projectId);
   let cursor = 0;
 
@@ -27,7 +27,7 @@ export function exportSrt(projectId: string): string {
   });
 
   const output = blocks.join('\n');
-  const filePath = join(getProjectAssetsDir(projectId), `transcript-${Date.now()}.srt`);
+  const filePath = outputPath ?? join(getProjectAssetsDir(projectId), `transcript-${Date.now()}.srt`);
   writeFileSync(filePath, output, 'utf8');
   return filePath;
 }
