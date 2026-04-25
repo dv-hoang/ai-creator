@@ -6,7 +6,8 @@ const api: ElectronApi = {
     get: () => ipcRenderer.invoke('settings:get'),
     save: (settings) => ipcRenderer.invoke('settings:save', settings),
     validateProvider: (provider, apiKey) => ipcRenderer.invoke('settings:validateProvider', provider, apiKey),
-    listModels: (provider, apiKey) => ipcRenderer.invoke('settings:listModels', provider, apiKey)
+    listModels: (provider, apiKey) => ipcRenderer.invoke('settings:listModels', provider, apiKey),
+    checkForUpdates: () => ipcRenderer.invoke('settings:checkForUpdates')
   },
   projects: {
     list: () => ipcRenderer.invoke('projects:list'),
@@ -30,6 +31,9 @@ const api: ElectronApi = {
   transcript: {
     untimedText: (projectId) => ipcRenderer.invoke('transcript:untimedText', projectId),
     exportSrt: (projectId) => ipcRenderer.invoke('transcript:exportSrt', projectId)
+  },
+  app: {
+    openExternal: (url) => ipcRenderer.invoke('app:openExternal', url)
   }
 };
 

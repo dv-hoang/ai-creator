@@ -27,6 +27,7 @@ export interface ProjectInput {
 export interface ProjectRecord extends ProjectInput {
   id: string;
   status: 'draft' | 'processing' | 'ready' | 'error';
+  statusDetail: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -127,12 +128,21 @@ export interface ValidateProviderResult {
   message: string;
 }
 
+export interface UpdateCheckResult {
+  hasUpdate: boolean;
+  currentVersion: string;
+  latestVersion: string;
+  releaseUrl: string;
+  repo: string;
+}
+
 export interface ElectronApi {
   settings: {
     get(): Promise<AppSettings>;
     save(settings: AppSettings): Promise<AppSettings>;
     validateProvider(provider: ProviderName, apiKey?: string): Promise<ValidateProviderResult>;
     listModels(provider: ProviderName, apiKey?: string): Promise<string[]>;
+    checkForUpdates(): Promise<UpdateCheckResult>;
   };
   projects: {
     list(): Promise<ProjectRecord[]>;
@@ -156,5 +166,8 @@ export interface ElectronApi {
   transcript: {
     untimedText(projectId: string): Promise<string>;
     exportSrt(projectId: string): Promise<string>;
+  };
+  app: {
+    openExternal(url: string): Promise<boolean>;
   };
 }

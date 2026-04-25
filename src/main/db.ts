@@ -64,6 +64,13 @@ function defaultData(): AppData {
   };
 }
 
+function normalizeProjectRecord(project: ProjectRecord): ProjectRecord {
+  return {
+    ...project,
+    statusDetail: project.statusDetail ?? null
+  };
+}
+
 function defaultProjectData(): ProjectData {
   return {
     step1Outputs: [],
@@ -275,7 +282,9 @@ function loadData(): AppData {
 
   const raw = readFileSync(dataFilePath, 'utf8');
   const parsed = JSON.parse(raw) as Partial<AppData> & Record<string, unknown>;
-  const projects = parsed.projects ?? [];
+  const projects = (parsed.projects ?? []).map((project) =>
+    normalizeProjectRecord(project as ProjectRecord)
+  );
   dataStore = {
     settings: {
       ...defaultSettings,
@@ -314,6 +323,7 @@ export function createProject(input: ProjectInput): ProjectRecord {
   const project: ProjectRecord = {
     id: randomUUID(),
     status: 'processing',
+    statusDetail: null,
     createdAt: nowIso(),
     updatedAt: nowIso(),
     ...input
@@ -325,7 +335,11 @@ export function createProject(input: ProjectInput): ProjectRecord {
   return project;
 }
 
-export function updateProjectStatus(projectId: string, status: ProjectRecord['status']): void {
+export function updateProjectStatus(
+  projectId: string,
+  status: ProjectRecord['status'],
+  statusDetail?: string | null
+): void {
   const data = loadData();
   const project = data.projects.find((item) => item.id === projectId);
   if (!project) {
@@ -333,6 +347,11 @@ export function updateProjectStatus(projectId: string, status: ProjectRecord['st
   }
 
   project.status = status;
+  if (status === 'error') {
+    project.statusDetail = statusDetail?.trim() ? statusDetail.trim() : 'Unknown generation error';
+  } else {
+    project.statusDetail = null;
+  }
   project.updatedAt = nowIso();
   saveData();
 }

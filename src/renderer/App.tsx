@@ -11,6 +11,7 @@ import type {
   Scene,
   TaskModelMapping,
   TranscriptRow,
+  UpdateCheckResult,
 } from "@shared/types";
 
 const languageOptions = [
@@ -92,6 +93,8 @@ export function App() {
   const [settingsLoadError, setSettingsLoadError] = useState<string | null>(
     null,
   );
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [latestUpdate, setLatestUpdate] = useState<UpdateCheckResult | null>(null);
   const [busy, setBusy] = useState(false);
   const { enqueueSnackbar } = useSnackbar();
   const locale = settings?.language ?? "en";
@@ -145,11 +148,16 @@ export function App() {
     }
   }
 
-  async function refreshWorkspace(projectId: string) {
+  async function refreshWorkspace(
+    projectId: string,
+    options?: { resetTab?: boolean },
+  ) {
     if (!electronApi) return;
     const next = await electronApi.projects.getWorkspace(projectId);
     setWorkspace(next);
-    setSelectedTab("Info");
+    if (options?.resetTab) {
+      setSelectedTab("Info");
+    }
     const nextAssets = await electronApi.assets.listByProject(projectId);
     setAssets(nextAssets);
     setSelectedAssetIds([]);
@@ -178,6 +186,30 @@ export function App() {
       }
     })();
   }, [electronApi, enqueueSnackbar]);
+
+  useEffect(() => {
+    if (!electronApi) {
+      return;
+    }
+
+    const hasProcessingProject =
+      workspace?.project.status === "processing" ||
+      projects.some((project) => project.status === "processing");
+    if (!hasProcessingProject) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      void (async () => {
+        await refreshProjects();
+        if (workspace?.project.status === "processing") {
+          await refreshWorkspace(workspace.project.id);
+        }
+      })();
+    }, 2500);
+
+    return () => window.clearInterval(interval);
+  }, [electronApi, projects, workspace?.project.id, workspace?.project.status]);
 
   const assetsByEntity = useMemo(() => {
     const map = new Map<string, AssetRecord[]>();
@@ -443,6 +475,55 @@ export function App() {
     );
   }
 
+  async function handleCheckForUpdates() {
+    if (!electronApi || !settings) return;
+    setCheckingUpdate(true);
+    try {
+      const result = await electronApi.settings.checkForUpdates();
+      setLatestUpdate(result);
+      if (result.hasUpdate) {
+        enqueueSnackbar(
+          t(
+            `Update available: ${result.latestVersion} (current ${result.currentVersion})`,
+            `Có bản cập nhật: ${result.latestVersion} (hiện tại ${result.currentVersion})`,
+          ),
+          { variant: "warning" },
+        );
+      } else {
+        enqueueSnackbar(
+          t(
+            `You are up to date (${result.currentVersion})`,
+            `Bạn đang dùng bản mới nhất (${result.currentVersion})`,
+          ),
+          { variant: "success" },
+        );
+      }
+    } catch (error) {
+      enqueueSnackbar(
+        error instanceof Error
+          ? error.message
+          : t("Failed to check updates.", "Không thể kiểm tra cập nhật."),
+        { variant: "error" },
+      );
+    } finally {
+      setCheckingUpdate(false);
+    }
+  }
+
+  async function handleOpenLatestRelease() {
+    if (!electronApi || !latestUpdate?.releaseUrl) return;
+    try {
+      await electronApi.app.openExternal(latestUpdate.releaseUrl);
+    } catch (error) {
+      enqueueSnackbar(
+        error instanceof Error
+          ? error.message
+          : t("Failed to open release page.", "Không thể mở trang release."),
+        { variant: "error" },
+      );
+    }
+  }
+
   function updateTaskMapping(
     task: GenerationTask,
     patch: Partial<TaskModelMapping>,
@@ -597,6 +678,38 @@ export function App() {
                     ))}
                   </select>
                 </label>
+                <div className="panel-subtle">
+                  <label>
+                    {t("App Update", "Cập nhật ứng dụng")}
+                    <div className="inline-row">
+                      <button
+                        className="btn"
+                        onClick={() => void handleCheckForUpdates()}
+                        disabled={checkingUpdate}
+                      >
+                        {checkingUpdate
+                          ? t("Checking...", "Đang kiểm tra...")
+                          : t("Check Update", "Kiểm tra cập nhật")}
+                      </button>
+                    </div>
+                  </label>
+                  {latestUpdate && (
+                    <div className="muted">
+                      <p>
+                        {t("Current", "Hiện tại")}: {latestUpdate.currentVersion} •{" "}
+                        {t("Latest", "Mới nhất")}: {latestUpdate.latestVersion}
+                      </p>
+                      {latestUpdate.hasUpdate && (
+                        <button
+                          className="btn"
+                          onClick={() => void handleOpenLatestRelease()}
+                        >
+                          {t("Open Latest Release", "Mở release mới nhất")}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
 
                 <div className="provider-keys">
                   {providers.map((provider) => (
@@ -737,7 +850,9 @@ export function App() {
                 <button
                   key={project.id}
                   className="project-card"
-                  onClick={() => void refreshWorkspace(project.id)}
+                  onClick={() =>
+                    void refreshWorkspace(project.id, { resetTab: true })
+                  }
                 >
                   <h3>{project.title}</h3>
                   <p>{project.visualStyle}</p>
@@ -1387,6 +1502,12 @@ function InfoView(props: { project: ProjectRecord; locale: "en" | "vi" }) {
           <span>{t("Status", "Trạng thái")}</span>
           <strong>{project.status}</strong>
         </div>
+        {project.status === "error" && (
+          <div className="info-row">
+            <span>{t("Script Error", "Lỗi tạo kịch bản")}</span>
+            <strong>{project.statusDetail || "-"}</strong>
+          </div>
+        )}
         <div className="info-row">
           <span>{t("Prompt Language", "Ngôn ngữ prompt")}</span>
           <strong>{project.promptLanguage}</strong>

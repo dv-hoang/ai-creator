@@ -1,4 +1,4 @@
-import { dialog, ipcMain } from 'electron';
+import { dialog, ipcMain, shell } from 'electron';
 import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -30,6 +30,9 @@ import {
 import { generateImage, generateStep1, generateVideoFromImage, listProviderModels, validateProvider } from './providers';
 import { buildUntimedTranscript, exportSrt } from './transcript';
 import { renderAnimationPrompt } from './template';
+import { checkGithubReleaseUpdate } from './update';
+
+const DEFAULT_RELEASE_REPO = 'https://github.com/dv-hoang/ai-creator';
 
 function bind<T>(channel: string, handler: (...args: any[]) => Promise<T> | T): void {
   ipcMain.handle(channel, async (_, ...args) => {
@@ -190,6 +193,16 @@ export function registerIpc(): void {
   });
   bind('settings:validateProvider', (provider, apiKey?: string) => validateProvider(provider, apiKey));
   bind('settings:listModels', (provider, apiKey?: string) => listProviderModels(provider, apiKey));
+  bind('settings:checkForUpdates', async () => {
+    return checkGithubReleaseUpdate(DEFAULT_RELEASE_REPO);
+  });
+  bind('app:openExternal', async (url: string) => {
+    if (!/^https?:\/\//i.test(url)) {
+      throw new Error('Only http/https URLs are allowed');
+    }
+    await shell.openExternal(url);
+    return true;
+  });
 
   bind('projects:list', () => listProjects());
   bind('projects:getWorkspace', (projectId) => getWorkspace(projectId));
@@ -205,8 +218,9 @@ export function registerIpc(): void {
         saveScenes(normalized.scenes);
         saveTranscripts(normalized.transcripts);
         updateProjectStatus(project.id, 'ready');
-      } catch {
-        updateProjectStatus(project.id, 'error');
+      } catch (error) {
+        const errorDetail = error instanceof Error ? error.message : 'Unknown generation error';
+        updateProjectStatus(project.id, 'error', errorDetail);
       }
     })();
 
