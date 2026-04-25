@@ -223,6 +223,14 @@
   optionalDependencies:
     global-agent "^3.0.0"
 
+"@electron/notarize@^3.1.1":
+  version "3.1.1"
+  resolved "https://registry.npmjs.org/@electron/notarize/-/notarize-3.1.1.tgz"
+  integrity sha512-uQQSlOiJnqRkTL1wlEBAxe90nVN/Fc/hEmk0bqpKk8nKjV1if/tXLHKUPePtv9Xsx90PtZU8aidx5lAiOpjkQQ==
+  dependencies:
+    debug "^4.4.0"
+    promise-retry "^2.0.1"
+
 "@electron/notarize@2.5.0":
   version "2.5.0"
   resolved "https://registry.npmjs.org/@electron/notarize/-/notarize-2.5.0.tgz"
@@ -1342,7 +1350,7 @@ csstype@^3.0.10, csstype@^3.2.2:
   resolved "https://registry.npmjs.org/csstype/-/csstype-3.2.3.tgz"
   integrity sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==
 
-debug@^4.1.0, debug@^4.1.1, debug@^4.3.1, debug@^4.3.2, debug@^4.3.4, debug@^4.4.3, debug@4:
+debug@^4.1.0, debug@^4.1.1, debug@^4.3.1, debug@^4.3.2, debug@^4.3.4, debug@^4.4.0, debug@^4.4.3, debug@4:
   version "4.4.3"
   resolved "https://registry.npmjs.org/debug/-/debug-4.4.3.tgz"
   integrity sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==

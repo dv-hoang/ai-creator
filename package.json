@@ -1,6 +1,7 @@
 {
   "name": "ai-creator",
   "version": "0.1.0",
+  "packageManager": "yarn@1.22.22",
   "main": "out/main/index.js",
   "type": "module",
   "scripts": {
@@ -9,6 +10,8 @@
     "dist": "npm run build && electron-builder",
     "dist:mac": "npm run build && electron-builder --mac dmg zip",
     "dist:mac:all": "npm run build && electron-builder --mac dmg zip --arm64 --x64",
+    "dist:mac:signed": "npm run build && electron-builder --mac dmg zip --publish never",
+    "dist:mac:signed:all": "npm run build && electron-builder --mac dmg zip --arm64 --x64 --publish never",
     "preview": "electron-vite preview",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "test": "vitest run"
@@ -25,6 +28,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@electron/notarize": "^3.1.1",
     "@eslint/js": "^10.0.1",
     "@tailwindcss/vite": "^4.2.4",
     "@types/node": "^25.6.0",
@@ -49,6 +53,12 @@
     "appId": "com.aicreator.desktop",
     "productName": "AI Creator",
     "asar": true,
+    "npmRebuild": true,
+    "buildDependenciesFromSource": false,
+    "asarUnpack": [
+      "**/node_modules/sharp/**/*",
+      "**/node_modules/@img/**/*"
+    ],
     "directories": {
       "output": "release"
     },
@@ -63,9 +73,14 @@
         "zip"
       ],
       "icon": "src/assets/icons/app.icns",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "config/entitlements.mac.plist",
+      "entitlementsInherit": "config/entitlements.mac.plist",
       "artifactName": "${productName}-${version}-${arch}.${ext}",
       "category": "public.app-category.graphics-design"
     },
+    "afterSign": "scripts/notarize.mjs",
     "dmg": {
       "title": "${productName} ${version}",
       "writeUpdateInfo": false

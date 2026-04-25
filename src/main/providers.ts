@@ -1,11 +1,43 @@
 import { randomUUID } from 'node:crypto';
 import { copyFileSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
-import sharp from 'sharp';
 import type { AppSettings, GenerationTask, ProviderName, Step1Response, ValidateProviderResult } from '@shared/types';
 import { getAsset, getProjectAssetsDir, getSettings } from './db';
 import { step1Schema } from './schemas';
 import { stripJsonFence } from './template';
+
+type SharpLike = (input: string) => {
+  rotate: () => ReturnType<SharpLike>;
+  resize: (options: { width: number; withoutEnlargement: boolean }) => ReturnType<SharpLike>;
+  webp: (options: { quality: number; effort: number }) => ReturnType<SharpLike>;
+  toFile: (path: string) => Promise<unknown>;
+};
+
+let cachedSharp: SharpLike | null = null;
+let sharpLoadError: string | null = null;
+
+async function loadSharp(): Promise<SharpLike | null> {
+  if (cachedSharp) {
+    return cachedSharp;
+  }
+  if (sharpLoadError) {
+    return null;
+  }
+
+  try {
+    const mod = await import('sharp');
+    const candidate = (mod.default ?? mod) as unknown;
+    if (typeof candidate !== 'function') {
+      sharpLoadError = 'sharp export is not callable';
+      return null;
+    }
+    cachedSharp = candidate as SharpLike;
+    return cachedSharp;
+  } catch (error) {
+    sharpLoadError = error instanceof Error ? error.message : 'failed to load sharp';
+    return null;
+  }
+}
 
 function getKey(provider: ProviderName, settings: AppSettings): string {
   const key = settings.providerKeys[provider];
@@ -104,6 +136,18 @@ async function archiveAndCompressGeneratedImage(
   filePath: string,
   projectAssetsDir: string
 ): Promise<{ filePath: string; metadata: Record<string, unknown> }> {
+  const sharp = await loadSharp();
+  if (!sharp) {
+    return {
+      filePath,
+      metadata: {
+        compressed: false,
+        reason: 'sharp_unavailable',
+        detail: sharpLoadError ?? 'sharp module could not be loaded'
+      }
+    };
+  }
+
   const extension = filePath.split('.').pop()?.toLowerCase() ?? '';
   if (!['png', 'jpg', 'jpeg', 'webp'].includes(extension)) {
     return { filePath, metadata: { compressed: false, reason: 'unsupported_format' } };
