@@ -240,10 +240,16 @@ async function geminiGenerateImage(
     throw new Error('Gemini image generation did not return inline image bytes');
   }
 
-  const extension = pickImageExtension(inline.mime_type ?? inline.mimeType ?? 'image/png');
+  let inlineMimeType: string | undefined;
+  if ('mime_type' in inline) {
+    inlineMimeType = inline.mime_type;
+  } else if ('mimeType' in inline) {
+    inlineMimeType = inline.mimeType;
+  }
+  const extension = pickImageExtension(inlineMimeType ?? 'image/png');
   const filePath = `${outputPathWithoutExt}.${extension}`;
   writeFileSync(filePath, Buffer.from(inline.data, 'base64'));
-  return { filePath, metadata: { mimeType: inline.mime_type ?? inline.mimeType } };
+  return { filePath, metadata: { mimeType: inlineMimeType } };
 }
 
 async function openAiGenerateVideoFromImage(

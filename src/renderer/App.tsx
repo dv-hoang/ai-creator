@@ -54,14 +54,16 @@ function toRenderableSrc(filePath: string): string {
     return filePath;
   }
   const normalized = filePath.replaceAll("\\", "/");
-  const absolutePath = normalized.startsWith("/") ? normalized : `/${normalized}`;
+  const absolutePath = normalized.startsWith("/")
+    ? normalized
+    : `/${normalized}`;
   return `file://${encodeURI(absolutePath)}`;
 }
 
 export function App() {
-  const [electronApi, setElectronApi] = useState<typeof window.electronApi | null>(
-    window.electronApi ?? null,
-  );
+  const [electronApi, setElectronApi] = useState<
+    typeof window.electronApi | null
+  >(window.electronApi ?? null);
   const [activePage, setActivePage] = useState<"workspace" | "settings">(
     "workspace",
   );
@@ -70,8 +72,8 @@ export function App() {
   const [assets, setAssets] = useState<AssetRecord[]>([]);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [selectedTab, setSelectedTab] = useState<
-    "Characters" | "Scenes" | "Transcript"
-  >("Characters");
+    "Info" | "Characters" | "Scenes" | "Transcript"
+  >("Info");
   const [showCreateProject, setShowCreateProject] = useState(false);
   const [projectForm, setProjectForm] =
     useState<ProjectInput>(emptyProjectInput);
@@ -81,13 +83,15 @@ export function App() {
     src: string;
     alt: string;
   } | null>(null);
-  const [generatingCharacterIds, setGeneratingCharacterIds] = useState<Set<string>>(
-    () => new Set(),
-  );
+  const [generatingCharacterIds, setGeneratingCharacterIds] = useState<
+    Set<string>
+  >(() => new Set());
   const [generatingSceneIds, setGeneratingSceneIds] = useState<Set<string>>(
     () => new Set(),
   );
-  const [settingsLoadError, setSettingsLoadError] = useState<string | null>(null);
+  const [settingsLoadError, setSettingsLoadError] = useState<string | null>(
+    null,
+  );
   const [busy, setBusy] = useState(false);
   const { enqueueSnackbar } = useSnackbar();
   const locale = settings?.language ?? "en";
@@ -130,9 +134,7 @@ export function App() {
       setSettingsLoadError(null);
     } catch (error) {
       const message =
-        error instanceof Error
-          ? error.message
-          : "Failed to load settings.";
+        error instanceof Error ? error.message : "Failed to load settings.";
       setSettingsLoadError(message);
       enqueueSnackbar(
         locale === "vi"
@@ -147,11 +149,11 @@ export function App() {
     if (!electronApi) return;
     const next = await electronApi.projects.getWorkspace(projectId);
     setWorkspace(next);
+    setSelectedTab("Info");
     const nextAssets = await electronApi.assets.listByProject(projectId);
     setAssets(nextAssets);
     setSelectedAssetIds([]);
-    const transcriptText =
-      await electronApi.transcript.untimedText(projectId);
+    const transcriptText = await electronApi.transcript.untimedText(projectId);
     setUntimedTranscript(transcriptText);
   }
 
@@ -166,9 +168,7 @@ export function App() {
         await refreshProjects();
       } catch (error) {
         const message =
-          error instanceof Error
-            ? error.message
-            : "Failed to load projects.";
+          error instanceof Error ? error.message : "Failed to load projects.";
         enqueueSnackbar(
           locale === "vi"
             ? `Tải dự án thất bại: ${message}`
@@ -218,6 +218,7 @@ export function App() {
     try {
       const created = await electronApi.projects.create(projectForm);
       setWorkspace(created);
+      setSelectedTab("Info");
       setShowCreateProject(false);
       setProjectForm(emptyProjectInput);
       await refreshProjects();
@@ -245,7 +246,10 @@ export function App() {
   async function handleValidateProvider(provider: "openai" | "gemini") {
     if (!electronApi) return;
     const apiKey = settings?.providerKeys[provider]?.trim() ?? "";
-    const result = await electronApi.settings.validateProvider(provider, apiKey);
+    const result = await electronApi.settings.validateProvider(
+      provider,
+      apiKey,
+    );
     enqueueSnackbar(result.message, {
       variant: result.ok ? "success" : "error",
     });
@@ -422,7 +426,9 @@ export function App() {
       return;
     }
     enqueueSnackbar(
-      locale === "vi" ? `Đã xuất SRT: ${filePath}` : `SRT exported: ${filePath}`,
+      locale === "vi"
+        ? `Đã xuất SRT: ${filePath}`
+        : `SRT exported: ${filePath}`,
       { variant: "success" },
     );
   }
@@ -494,10 +500,7 @@ export function App() {
                 "Không thể tải cầu nối preload của Electron (`window.electronApi`). Ứng dụng đang tự thử lại. Nếu lỗi vẫn còn, hãy khởi động lại dev server và Electron.",
               )}
             </p>
-            <button
-              className="btn"
-              onClick={() => window.location.reload()}
-            >
+            <button className="btn" onClick={() => window.location.reload()}>
               {t("Retry Now", "Thử lại ngay")}
             </button>
           </section>
@@ -527,10 +530,7 @@ export function App() {
         </div>
 
         <div className="sidebar-actions">
-          <button
-            className="btn btn-primary"
-            onClick={handleOpenCreateProject}
-          >
+          <button className="btn btn-primary" onClick={handleOpenCreateProject}>
             {t("+ New Project", "+ Dự án mới")}
           </button>
         </div>
@@ -553,7 +553,11 @@ export function App() {
             <div className="section-head">
               <h2>{t("Global Settings", "Cài đặt toàn cục")}</h2>
               <div className="inline-row">
-                {busy && <span className="pill">{t("Working...", "Đang xử lý...")}</span>}
+                {busy && (
+                  <span className="pill">
+                    {t("Working...", "Đang xử lý...")}
+                  </span>
+                )}
                 <button
                   className="btn btn-primary"
                   onClick={handleSaveSettings}
@@ -680,9 +684,11 @@ export function App() {
                           )}
                         </option>
                       ) : (
-                        (settings.providerModels[
-                          settings.taskModelMappings[task].provider
-                        ] ?? []).map((model) => (
+                        (
+                          settings.providerModels[
+                            settings.taskModelMappings[task].provider
+                          ] ?? []
+                        ).map((model) => (
                           <option key={model} value={model}>
                             {model}
                           </option>
@@ -696,7 +702,10 @@ export function App() {
             {!settings && (
               <div className="panel-subtle empty-state">
                 <p>
-                  {t("Settings are not available yet.", "Chưa có cài đặt khả dụng.")}
+                  {t(
+                    "Settings are not available yet.",
+                    "Chưa có cài đặt khả dụng.",
+                  )}
                   {settingsLoadError ? ` ${settingsLoadError}` : ""}
                 </p>
                 <button
@@ -746,7 +755,9 @@ export function App() {
             <div className="modal-card panel">
               <div className="section-head">
                 <h2>{t("Create Project", "Tạo dự án")}</h2>
-                <span className="pill">{t("Step 1 Setup", "Thiết lập Bước 1")}</span>
+                <span className="pill">
+                  {t("Step 1 Setup", "Thiết lập Bước 1")}
+                </span>
               </div>
               <label>
                 {t("Title", "Tiêu đề")}
@@ -886,7 +897,7 @@ export function App() {
                     busy || !projectForm.title || !projectForm.originalContent
                   }
                 >
-                  {t("Create + Generate Step 1", "Tạo + Sinh Bước 1")}
+                  {t("Create", "Tạo")}
                 </button>
               </div>
             </div>
@@ -904,25 +915,30 @@ export function App() {
                 </p>
               </div>
               <div className="inline-row tab-row">
-                {(["Characters", "Scenes", "Transcript"] as const).map((tab) => (
-                  <button
-                    key={tab}
-                    className={`btn ${selectedTab === tab ? "active" : ""}`}
-                    onClick={() => setSelectedTab(tab)}
-                  >
-                    {tab === "Characters"
-                      ? t("Characters", "Nhân vật")
-                      : tab === "Scenes"
-                        ? t("Scenes", "Cảnh")
-                        : t("Transcript", "Lời thoại")}
-                  </button>
-                ))}
+                {(["Info", "Characters", "Scenes", "Transcript"] as const).map(
+                  (tab) => (
+                    <button
+                      key={tab}
+                      className={`btn ${selectedTab === tab ? "active" : ""}`}
+                      onClick={() => setSelectedTab(tab)}
+                    >
+                      {tab === "Info"
+                        ? t("Info", "Thông tin")
+                        : tab === "Characters"
+                          ? t("Characters", "Nhân vật")
+                          : tab === "Scenes"
+                            ? t("Scenes", "Cảnh")
+                            : t("Transcript", "Lời thoại")}
+                    </button>
+                  ),
+                )}
               </div>
             </header>
 
             <div className="download-strip">
               <p>
-                {selectedAssetIds.length} {t("assets selected", "tài nguyên đã chọn")}
+                {selectedAssetIds.length}{" "}
+                {t("assets selected", "tài nguyên đã chọn")}
               </p>
               <button
                 className="btn"
@@ -932,6 +948,10 @@ export function App() {
                 {t("Download Selected", "Tải đã chọn")}
               </button>
             </div>
+
+            {selectedTab === "Info" && (
+              <InfoView project={workspace.project} locale={locale} />
+            )}
 
             {selectedTab === "Characters" && (
               <CharactersView
@@ -1001,10 +1021,7 @@ export function App() {
         )}
 
         {lightboxImage && (
-          <section
-            className="lightbox"
-            onClick={() => setLightboxImage(null)}
-          >
+          <section className="lightbox" onClick={() => setLightboxImage(null)}>
             <button
               className="lightbox-close"
               type="button"
@@ -1021,7 +1038,6 @@ export function App() {
             />
           </section>
         )}
-
       </main>
     </div>
   );
@@ -1044,13 +1060,15 @@ function CharactersView(props: {
     <div className="entity-grid">
       {props.characters.map((character) => {
         const prompt = character.promptOverride ?? character.promptTextToImage;
-        const imageAsset = (props.assetsByEntity.get(`character:${character.id}`) ?? []).find(
-          (asset) => asset.kind === "image",
-        );
+        const imageAsset = (
+          props.assetsByEntity.get(`character:${character.id}`) ?? []
+        ).find((asset) => asset.kind === "image");
 
         return (
           <article key={character.id} className="entity-card panel-subtle">
-            <h3>{character.name} {t("Prompt", "Prompt")}</h3>
+            <h3>
+              {character.name} {t("Prompt", "Prompt")}
+            </h3>
             <div className="character-layout">
               <div className="character-preview">
                 {imageAsset ? (
@@ -1138,12 +1156,12 @@ function ScenesView(props: {
   return (
     <div className="entity-grid">
       {props.scenes.map((scene) => {
-        const assets = (props.assetsByEntity.get(`scene:${scene.id}`) ?? []).filter(
-          (asset) => asset.kind === "image",
-        );
-        const videos = (props.assetsByEntity.get(`video:${scene.id}`) ?? []).filter(
-          (asset) => asset.kind === "video",
-        );
+        const assets = (
+          props.assetsByEntity.get(`scene:${scene.id}`) ?? []
+        ).filter((asset) => asset.kind === "image");
+        const videos = (
+          props.assetsByEntity.get(`video:${scene.id}`) ?? []
+        ).filter((asset) => asset.kind === "video");
         const textPrompt =
           scene.promptOverrideTextToImage ?? scene.promptTextToImage;
         const videoPrompt =
@@ -1182,7 +1200,10 @@ function ScenesView(props: {
                   </label>
                 ) : (
                   <div className="scene-placeholder">
-                    {t("No generated scene image yet", "Chưa có ảnh cảnh được tạo")}
+                    {t(
+                      "No generated scene image yet",
+                      "Chưa có ảnh cảnh được tạo",
+                    )}
                   </div>
                 )}
                 {videos[0] && (
@@ -1211,12 +1232,17 @@ function ScenesView(props: {
                   <div className="refs-list">
                     {scene.requiredCharacterRefs.length > 0 ? (
                       scene.requiredCharacterRefs.map((refName) => (
-                        <span key={`${scene.id}-${refName}`} className="ref-chip">
+                        <span
+                          key={`${scene.id}-${refName}`}
+                          className="ref-chip"
+                        >
                           {refName}
                         </span>
                       ))
                     ) : (
-                      <span className="ref-chip ref-chip-empty">{t("None", "Không có")}</span>
+                      <span className="ref-chip ref-chip-empty">
+                        {t("None", "Không có")}
+                      </span>
                     )}
                   </div>
                 </div>
@@ -1226,13 +1252,11 @@ function ScenesView(props: {
                     rows={4}
                     value={textPrompt}
                     onChange={(nextValue) =>
-                      void props.onUpdatePrompts(
-                        scene,
-                        nextValue,
-                        videoPrompt,
-                      )
+                      void props.onUpdatePrompts(scene, nextValue, videoPrompt)
                     }
-                    onCopy={() => void props.onCopyTextPrompt(scene, textPrompt)}
+                    onCopy={() =>
+                      void props.onCopyTextPrompt(scene, textPrompt)
+                    }
                   />
                 </label>
                 <label>
@@ -1241,13 +1265,11 @@ function ScenesView(props: {
                     rows={4}
                     value={videoPrompt}
                     onChange={(nextValue) =>
-                      void props.onUpdatePrompts(
-                        scene,
-                        textPrompt,
-                        nextValue,
-                      )
+                      void props.onUpdatePrompts(scene, textPrompt, nextValue)
                     }
-                    onCopy={() => void props.onCopyVideoPrompt(scene, videoPrompt)}
+                    onCopy={() =>
+                      void props.onCopyVideoPrompt(scene, videoPrompt)
+                    }
                   />
                 </label>
                 <div className="inline-row">
@@ -1345,6 +1367,60 @@ function TranscriptView(props: {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function InfoView(props: { project: ProjectRecord; locale: "en" | "vi" }) {
+  const t = (en: string, vi: string) => (props.locale === "vi" ? vi : en);
+  const project = props.project;
+
+  return (
+    <div className="panel-subtle info-view">
+      <h3>{t("Project Info", "Thông tin dự án")}</h3>
+      <div className="info-grid">
+        <div className="info-row">
+          <span>{t("Title", "Tiêu đề")}</span>
+          <strong>{project.title}</strong>
+        </div>
+        <div className="info-row">
+          <span>{t("Status", "Trạng thái")}</span>
+          <strong>{project.status}</strong>
+        </div>
+        <div className="info-row">
+          <span>{t("Prompt Language", "Ngôn ngữ prompt")}</span>
+          <strong>{project.promptLanguage}</strong>
+        </div>
+        <div className="info-row">
+          <span>{t("Story Language", "Ngôn ngữ câu chuyện")}</span>
+          <strong>{project.transcriptLanguagePolicy}</strong>
+        </div>
+        <div className="info-row">
+          <span>{t("Aspect Ratio", "Tỷ lệ khung hình")}</span>
+          <strong>{project.aspectRatio}</strong>
+        </div>
+        <div className="info-row">
+          <span>{t("Visual Style", "Phong cách hình ảnh")}</span>
+          <strong>{project.visualStyle}</strong>
+        </div>
+        <div className="info-row">
+          <span>{t("Art Direction Hint", "Gợi ý định hướng nghệ thuật")}</span>
+          <strong>{project.artDirectionHint || "-"}</strong>
+        </div>
+        <div className="info-row">
+          <span>{t("Created At", "Tạo lúc")}</span>
+          <strong>{new Date(project.createdAt).toLocaleString()}</strong>
+        </div>
+        <div className="info-row">
+          <span>{t("Updated At", "Cập nhật lúc")}</span>
+          <strong>{new Date(project.updatedAt).toLocaleString()}</strong>
+        </div>
+      </div>
+
+      <label className="info-content">
+        {t("Content (ORIGINAL_CONTENT)", "Nội dung (ORIGINAL_CONTENT)")}
+        <textarea readOnly rows={8} value={project.originalContent} />
+      </label>
     </div>
   );
 }

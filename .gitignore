@@ -4,3 +4,4 @@ data
 dist
 *.log
 release/**/*
+.DS_Store
