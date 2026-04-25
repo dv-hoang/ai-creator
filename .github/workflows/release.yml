@@ -20,11 +20,14 @@ jobs:
           cache: yarn
 
       - run: yarn install --frozen-lockfile
-      - run: yarn dist:mac:all
+      # electron-builder auto-publishes on tag in CI (needs GH_TOKEN); CI uses
+      # dist:mac:all:ci (--publish never) and uploads via action-gh-release instead.
+      - run: yarn dist:mac:all:ci
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
+          token: ${{ github.token }}
           files: |
             release/*.dmg
             release/*.zip

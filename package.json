@@ -10,6 +10,7 @@
     "dist": "npm run build && electron-builder",
     "dist:mac": "npm run build && electron-builder --mac dmg zip",
     "dist:mac:all": "npm run build && electron-builder --mac dmg zip --arm64 --x64",
+    "dist:mac:all:ci": "npm run build && electron-builder --mac dmg zip --arm64 --x64 --publish never",
     "dist:mac:signed": "npm run build && electron-builder --mac dmg zip --publish never",
     "dist:mac:signed:all": "npm run build && electron-builder --mac dmg zip --arm64 --x64 --publish never",
     "preview": "electron-vite preview",
