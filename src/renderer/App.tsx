@@ -94,8 +94,16 @@ export function App() {
     null,
   );
   const [checkingUpdate, setCheckingUpdate] = useState(false);
-  const [latestUpdate, setLatestUpdate] = useState<UpdateCheckResult | null>(null);
+  const [latestUpdate, setLatestUpdate] = useState<UpdateCheckResult | null>(
+    null,
+  );
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+  const [showUpdateAvailableModal, setShowUpdateAvailableModal] =
+    useState(false);
   const [busy, setBusy] = useState(false);
+  const [retryingScriptProjectId, setRetryingScriptProjectId] = useState<
+    string | null
+  >(null);
   const { enqueueSnackbar } = useSnackbar();
   const locale = settings?.language ?? "en";
   const t = (en: string, vi: string) => (locale === "vi" ? vi : en);
@@ -155,7 +163,7 @@ export function App() {
     if (!electronApi) return;
     const next = await electronApi.projects.getWorkspace(projectId);
     setWorkspace(next);
-    if (options?.resetTab) {
+    if (options?.resetTab || next.project.status === "error") {
       setSelectedTab("Info");
     }
     const nextAssets = await electronApi.assets.listByProject(projectId);
@@ -172,6 +180,21 @@ export function App() {
 
     void (async () => {
       await refreshSettings();
+      try {
+        setAppVersion(await electronApi.app.getVersion());
+      } catch {
+        /* sidebar still shows latestUpdate.currentVersion after check, if any */
+      }
+      try {
+        const result = await electronApi.settings.checkForUpdates();
+        setLatestUpdate(result);
+        setAppVersion((prev) => prev || result.currentVersion);
+        if (result.hasUpdate) {
+          setShowUpdateAvailableModal(true);
+        }
+      } catch {
+        /* sidebar / settings show placeholder until user checks manually */
+      }
       try {
         await refreshProjects();
       } catch (error) {
@@ -272,6 +295,37 @@ export function App() {
       );
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleRetryGenerateScript(projectId: string) {
+    if (!electronApi) return;
+    setRetryingScriptProjectId(projectId);
+    try {
+      await electronApi.projects.retryGenerateScript(projectId);
+      enqueueSnackbar(
+        t(
+          "Script generation restarted. This may take a minute.",
+          "Đã chạy lại tạo kịch bản. Quá trình có thể mất vài phút.",
+        ),
+        { variant: "success" },
+      );
+      await refreshProjects();
+      if (workspace?.project.id === projectId) {
+        await refreshWorkspace(projectId);
+      }
+    } catch (error) {
+      enqueueSnackbar(
+        error instanceof Error
+          ? error.message
+          : t(
+              "Failed to restart script generation.",
+              "Không thể chạy lại tạo kịch bản.",
+            ),
+        { variant: "error" },
+      );
+    } finally {
+      setRetryingScriptProjectId(null);
     }
   }
 
@@ -482,13 +536,7 @@ export function App() {
       const result = await electronApi.settings.checkForUpdates();
       setLatestUpdate(result);
       if (result.hasUpdate) {
-        enqueueSnackbar(
-          t(
-            `Update available: ${result.latestVersion} (current ${result.currentVersion})`,
-            `Có bản cập nhật: ${result.latestVersion} (hiện tại ${result.currentVersion})`,
-          ),
-          { variant: "warning" },
-        );
+        setShowUpdateAvailableModal(true);
       } else {
         enqueueSnackbar(
           t(
@@ -514,6 +562,7 @@ export function App() {
     if (!electronApi || !latestUpdate?.releaseUrl) return;
     try {
       await electronApi.app.openExternal(latestUpdate.releaseUrl);
+      setShowUpdateAvailableModal(false);
     } catch (error) {
       enqueueSnackbar(
         error instanceof Error
@@ -596,6 +645,16 @@ export function App() {
         <div className="brand-block">
           <h1>AI Creator</h1>
           <p className="muted">{t("Desktop Studio", "Studio Desktop")}</p>
+          <div className="brand-versions muted">
+            <p className="brand-versions-line">
+              {t("Current", "Hiện tại")}:{" "}
+              {appVersion ?? latestUpdate?.currentVersion ?? "—"}
+            </p>
+            <p className="brand-versions-line">
+              {t("Latest", "Mới nhất")}:{" "}
+              {latestUpdate?.latestVersion ?? "—"}
+            </p>
+          </div>
         </div>
 
         <div className="nav-stack">
@@ -696,7 +755,8 @@ export function App() {
                   {latestUpdate && (
                     <div className="muted">
                       <p>
-                        {t("Current", "Hiện tại")}: {latestUpdate.currentVersion} •{" "}
+                        {t("Current", "Hiện tại")}:{" "}
+                        {latestUpdate.currentVersion} •{" "}
                         {t("Latest", "Mới nhất")}: {latestUpdate.latestVersion}
                       </p>
                       {latestUpdate.hasUpdate && (
@@ -847,19 +907,36 @@ export function App() {
             </p>
             <div className="workspace-project-grid">
               {projects.map((project) => (
-                <button
-                  key={project.id}
-                  className="project-card"
-                  onClick={() =>
-                    void refreshWorkspace(project.id, { resetTab: true })
-                  }
-                >
-                  <h3>{project.title}</h3>
-                  <p>{project.visualStyle}</p>
-                  <small>
-                    {project.aspectRatio} • {project.status}
-                  </small>
-                </button>
+                <div key={project.id} className="project-card-stack">
+                  <button
+                    type="button"
+                    className="project-card"
+                    onClick={() =>
+                      void refreshWorkspace(project.id, { resetTab: true })
+                    }
+                  >
+                    <h3>{project.title}</h3>
+                    <p>{project.visualStyle}</p>
+                    <small>
+                      {project.aspectRatio} • {project.status}
+                    </small>
+                  </button>
+                  {project.status === "error" && (
+                    <button
+                      type="button"
+                      className="btn btn-primary project-card-retry"
+                      disabled={retryingScriptProjectId === project.id}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void handleRetryGenerateScript(project.id);
+                      }}
+                    >
+                      {retryingScriptProjectId === project.id
+                        ? t("Retrying...", "Đang thử lại...")
+                        : t("Retry script generation", "Tạo lại kịch bản")}
+                    </button>
+                  )}
+                </div>
               ))}
             </div>
           </section>
@@ -1019,6 +1096,52 @@ export function App() {
           </section>
         )}
 
+        {showUpdateAvailableModal && latestUpdate?.hasUpdate && (
+          <section className="modal">
+            <div
+              className="modal-card panel modal-card-compact"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="update-modal-title"
+            >
+              <div className="section-head">
+                <h2 id="update-modal-title">
+                  {t("Update available", "Có bản cập nhật mới")}
+                </h2>
+              </div>
+              <p className="muted">
+                {t(
+                  "A newer version is available. Download it from the release page.",
+                  "Đã có phiên bản mới. Tải xuống từ trang release.",
+                )}
+              </p>
+              <p>
+                {t("Current", "Hiện tại")}:{" "}
+                <strong>{latestUpdate.currentVersion}</strong>
+                {" · "}
+                {t("Latest", "Mới nhất")}:{" "}
+                <strong>{latestUpdate.latestVersion}</strong>
+              </p>
+              <div className="inline-row modal-actions">
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => setShowUpdateAvailableModal(false)}
+                >
+                  {t("Later", "Để sau")}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => void handleOpenLatestRelease()}
+                >
+                  {t("Open release page", "Mở trang release")}
+                </button>
+              </div>
+            </div>
+          </section>
+        )}
+
         {activePage === "workspace" && workspace && (
           <section className="workspace panel">
             <header>
@@ -1049,6 +1172,34 @@ export function App() {
                 )}
               </div>
             </header>
+
+            {workspace.project.status === "error" && (
+              <div className="workspace-script-error-banner" role="alert">
+                <div className="workspace-script-error-text">
+                  <strong>
+                    {t(
+                      "Script generation failed",
+                      "Tạo kịch bản thất bại",
+                    )}
+                  </strong>
+                  {workspace.project.statusDetail ? (
+                    <p className="muted">{workspace.project.statusDetail}</p>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={retryingScriptProjectId === workspace.project.id}
+                  onClick={() =>
+                    void handleRetryGenerateScript(workspace.project.id)
+                  }
+                >
+                  {retryingScriptProjectId === workspace.project.id
+                    ? t("Retrying...", "Đang thử lại...")
+                    : t("Retry script generation", "Tạo lại kịch bản")}
+                </button>
+              </div>
+            )}
 
             <div className="download-strip">
               <p>

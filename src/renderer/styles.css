@@ -65,6 +65,16 @@ select {
   margin: 0;
 }
 
+.brand-versions {
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.brand-versions-line {
+  margin: 0;
+}
+
 .sidebar-actions {
   display: grid;
   gap: 10px;
@@ -619,6 +629,10 @@ textarea:focus {
   gap: 12px;
 }
 
+.modal-card-compact {
+  width: min(440px, 92vw);
+}
+
 .modal-actions {
   justify-content: flex-end;
 }
@@ -646,8 +660,42 @@ textarea:focus {
   gap: 12px;
 }
 
+.project-card-stack {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.project-card-retry {
+  width: 100%;
+}
+
 .workspace-projects .project-card {
   min-height: 96px;
+}
+
+.workspace-script-error-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(251, 191, 36, 0.45);
+  background: rgba(120, 53, 15, 0.22);
+}
+
+.workspace-script-error-text {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.workspace-script-error-text .muted {
+  font-size: 13px;
+  line-height: 1.4;
 }
 
 .aspect-ratio-picker {

@@ -65,9 +65,13 @@ function defaultData(): AppData {
 }
 
 function normalizeProjectRecord(project: ProjectRecord): ProjectRecord {
+  const normalizedStatusDetail =
+    project.status === 'error'
+      ? project.statusDetail?.trim() || 'Unknown generation error'
+      : null;
   return {
     ...project,
-    statusDetail: project.statusDetail ?? null
+    statusDetail: normalizedStatusDetail
   };
 }
 
@@ -366,6 +370,12 @@ export function getProject(projectId: string): ProjectRecord {
     throw new Error('Project not found');
   }
   return project;
+}
+
+/** Clears step-1 outputs, characters, scenes, transcripts, and assets for a clean regeneration run. */
+export function resetProjectWorkspaceForRegeneration(projectId: string): void {
+  getProject(projectId);
+  saveProjectData(projectId, defaultProjectData());
 }
 
 export function saveStep1Output(projectId: string, rawResponse: string, normalizedJson: string): void {

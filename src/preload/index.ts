@@ -12,7 +12,8 @@ const api: ElectronApi = {
   projects: {
     list: () => ipcRenderer.invoke('projects:list'),
     create: (input) => ipcRenderer.invoke('projects:create', input),
-    getWorkspace: (projectId) => ipcRenderer.invoke('projects:getWorkspace', projectId)
+    getWorkspace: (projectId) => ipcRenderer.invoke('projects:getWorkspace', projectId),
+    retryGenerateScript: (projectId) => ipcRenderer.invoke('projects:retryGenerateScript', projectId)
   },
   characters: {
     updatePrompt: (characterId, prompt) => ipcRenderer.invoke('characters:updatePrompt', characterId, prompt),
@@ -33,6 +34,7 @@ const api: ElectronApi = {
     exportSrt: (projectId) => ipcRenderer.invoke('transcript:exportSrt', projectId)
   },
   app: {
+    getVersion: () => ipcRenderer.invoke('app:getVersion'),
     openExternal: (url) => ipcRenderer.invoke('app:openExternal', url)
   }
 };

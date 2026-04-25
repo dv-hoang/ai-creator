@@ -148,6 +148,7 @@ export interface ElectronApi {
     list(): Promise<ProjectRecord[]>;
     create(input: ProjectInput): Promise<ProjectWorkspace>;
     getWorkspace(projectId: string): Promise<ProjectWorkspace>;
+    retryGenerateScript(projectId: string): Promise<ProjectWorkspace>;
   };
   characters: {
     updatePrompt(characterId: string, prompt: string): Promise<Character>;
@@ -168,6 +169,7 @@ export interface ElectronApi {
     exportSrt(projectId: string): Promise<string>;
   };
   app: {
+    getVersion(): Promise<string>;
     openExternal(url: string): Promise<boolean>;
   };
 }

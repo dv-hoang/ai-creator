@@ -1,8 +1,8 @@
-import { dialog, ipcMain, shell } from 'electron';
+import { app, dialog, ipcMain, shell } from 'electron';
 import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { Character, ProjectInput, Scene, Step1Response } from '@shared/types';
+import type { Character, ProjectInput, ProjectRecord, Scene, Step1Response } from '@shared/types';
 import {
   createProject,
   getAsset,
@@ -17,6 +17,7 @@ import {
   initDb,
   linkCharacterAsset,
   listProjects,
+  resetProjectWorkspaceForRegeneration,
   saveAsset,
   saveCharacters,
   saveScenes,
@@ -44,6 +45,37 @@ function bind<T>(channel: string, handler: (...args: any[]) => Promise<T> | T): 
       });
     }
   });
+}
+
+function projectToScriptInput(project: ProjectRecord): ProjectInput {
+  return {
+    title: project.title,
+    originalContent: project.originalContent,
+    promptLanguage: project.promptLanguage,
+    transcriptLanguagePolicy: project.transcriptLanguagePolicy,
+    aspectRatio: project.aspectRatio,
+    visualStyle: project.visualStyle,
+    artDirectionHint: project.artDirectionHint
+  };
+}
+
+function runStep1ScriptPipeline(project: ProjectRecord): void {
+  const input = projectToScriptInput(project);
+  void (async () => {
+    try {
+      const prompt = renderAnimationPrompt(input);
+      const response = await generateStep1(prompt);
+      saveStep1Output(project.id, JSON.stringify(response), JSON.stringify(response));
+      const normalized = normalizeStep1(project.id, response);
+      saveCharacters(normalized.characters);
+      saveScenes(normalized.scenes);
+      saveTranscripts(normalized.transcripts);
+      updateProjectStatus(project.id, 'ready');
+    } catch (error) {
+      const errorDetail = error instanceof Error ? error.message : 'Unknown generation error';
+      updateProjectStatus(project.id, 'error', errorDetail);
+    }
+  })();
 }
 
 function normalizeStep1(projectId: string, response: Step1Response) {
@@ -196,6 +228,7 @@ export function registerIpc(): void {
   bind('settings:checkForUpdates', async () => {
     return checkGithubReleaseUpdate(DEFAULT_RELEASE_REPO);
   });
+  bind('app:getVersion', () => app.getVersion());
   bind('app:openExternal', async (url: string) => {
     if (!/^https?:\/\//i.test(url)) {
       throw new Error('Only http/https URLs are allowed');
@@ -208,23 +241,21 @@ export function registerIpc(): void {
   bind('projects:getWorkspace', (projectId) => getWorkspace(projectId));
   bind('projects:create', async (input: ProjectInput) => {
     const project = createProject(input);
-    void (async () => {
-      try {
-        const prompt = renderAnimationPrompt(input);
-        const response = await generateStep1(prompt);
-        saveStep1Output(project.id, JSON.stringify(response), JSON.stringify(response));
-        const normalized = normalizeStep1(project.id, response);
-        saveCharacters(normalized.characters);
-        saveScenes(normalized.scenes);
-        saveTranscripts(normalized.transcripts);
-        updateProjectStatus(project.id, 'ready');
-      } catch (error) {
-        const errorDetail = error instanceof Error ? error.message : 'Unknown generation error';
-        updateProjectStatus(project.id, 'error', errorDetail);
-      }
-    })();
-
+    runStep1ScriptPipeline(project);
     return getWorkspace(project.id);
+  });
+
+  bind('projects:retryGenerateScript', async (projectId: string) => {
+    const project = getProject(projectId);
+    if (project.status !== 'error') {
+      throw new Error(
+        'Script regeneration is only available when the project is in the error state.'
+      );
+    }
+    resetProjectWorkspaceForRegeneration(projectId);
+    updateProjectStatus(projectId, 'processing');
+    runStep1ScriptPipeline(getProject(projectId));
+    return getWorkspace(projectId);
   });
 
   bind('characters:updatePrompt', (characterId: string, prompt: string) => updateCharacterPrompt(characterId, prompt));
