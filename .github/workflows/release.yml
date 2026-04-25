@@ -15,7 +15,8 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # @electron/notarize@3.x requires Node >= 22.12.0 (engines field)
+          node-version: 22
           cache: yarn
 
       - run: yarn install --frozen-lockfile
