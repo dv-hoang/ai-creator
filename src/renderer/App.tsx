@@ -90,6 +90,8 @@ export function App() {
   const [settingsLoadError, setSettingsLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const { enqueueSnackbar } = useSnackbar();
+  const locale = settings?.language ?? "en";
+  const t = (en: string, vi: string) => (locale === "vi" ? vi : en);
 
   useEffect(() => {
     if (electronApi) {
@@ -132,7 +134,12 @@ export function App() {
           ? error.message
           : "Failed to load settings.";
       setSettingsLoadError(message);
-      enqueueSnackbar(`Settings load failed: ${message}`, { variant: "error" });
+      enqueueSnackbar(
+        locale === "vi"
+          ? `Tải cài đặt thất bại: ${message}`
+          : `Settings load failed: ${message}`,
+        { variant: "error" },
+      );
     }
   }
 
@@ -162,7 +169,12 @@ export function App() {
           error instanceof Error
             ? error.message
             : "Failed to load projects.";
-        enqueueSnackbar(`Projects load failed: ${message}`, { variant: "error" });
+        enqueueSnackbar(
+          locale === "vi"
+            ? `Tải dự án thất bại: ${message}`
+            : `Projects load failed: ${message}`,
+          { variant: "error" },
+        );
       }
     })();
   }, [electronApi, enqueueSnackbar]);
@@ -187,7 +199,9 @@ export function App() {
       const openAiModels = saved.providerModels.openai?.length ?? 0;
       const geminiModels = saved.providerModels.gemini?.length ?? 0;
       enqueueSnackbar(
-        `Global app settings saved. Loaded models: OpenAI ${openAiModels}, Gemini ${geminiModels}.`,
+        locale === "vi"
+          ? `Đã lưu cài đặt toàn cục. Mô hình đã tải: OpenAI ${openAiModels}, Gemini ${geminiModels}.`
+          : `Global app settings saved. Loaded models: OpenAI ${openAiModels}, Gemini ${geminiModels}.`,
         { variant: "success" },
       );
     } finally {
@@ -198,7 +212,9 @@ export function App() {
   async function handleCreateProject() {
     if (!electronApi) return;
     setBusy(true);
-    enqueueSnackbar("Creating project...", { variant: "info" });
+    enqueueSnackbar(t("Creating project...", "Đang tạo dự án..."), {
+      variant: "info",
+    });
     try {
       const created = await electronApi.projects.create(projectForm);
       setWorkspace(created);
@@ -210,7 +226,10 @@ export function App() {
       );
       setAssets(nextAssets);
       enqueueSnackbar(
-        "Project created. Step 1 generation is running in background.",
+        t(
+          "Project created. Step 1 generation is running in background.",
+          "Đã tạo dự án. Bước 1 đang được tạo ở nền.",
+        ),
         { variant: "success" },
       );
     } catch (error) {
@@ -244,14 +263,21 @@ export function App() {
     try {
       await electronApi.characters.generateImage(character.id);
       if (workspace) await refreshWorkspace(workspace.project.id);
-      enqueueSnackbar(`Generated image for ${character.name}`, {
-        variant: "success",
-      });
+      enqueueSnackbar(
+        locale === "vi"
+          ? `Đã tạo ảnh cho ${character.name}`
+          : `Generated image for ${character.name}`,
+        { variant: "success" },
+      );
     } catch (error) {
       enqueueSnackbar(
         error instanceof Error
-          ? `Failed to generate image for ${character.name}: ${error.message}`
-          : `Failed to generate image for ${character.name}`,
+          ? locale === "vi"
+            ? `Tạo ảnh cho ${character.name} thất bại: ${error.message}`
+            : `Failed to generate image for ${character.name}: ${error.message}`
+          : locale === "vi"
+            ? `Tạo ảnh cho ${character.name} thất bại`
+            : `Failed to generate image for ${character.name}`,
         { variant: "error" },
       );
     } finally {
@@ -276,14 +302,21 @@ export function App() {
     try {
       await electronApi.scenes.generateImage(scene.id);
       if (workspace) await refreshWorkspace(workspace.project.id);
-      enqueueSnackbar(`Generated image for scene ${scene.sceneIndex}`, {
-        variant: "success",
-      });
+      enqueueSnackbar(
+        locale === "vi"
+          ? `Đã tạo ảnh cho cảnh ${scene.sceneIndex}`
+          : `Generated image for scene ${scene.sceneIndex}`,
+        { variant: "success" },
+      );
     } catch (error) {
       enqueueSnackbar(
         error instanceof Error
-          ? `Failed to generate image for scene ${scene.sceneIndex}: ${error.message}`
-          : `Failed to generate image for scene ${scene.sceneIndex}`,
+          ? locale === "vi"
+            ? `Tạo ảnh cho cảnh ${scene.sceneIndex} thất bại: ${error.message}`
+            : `Failed to generate image for scene ${scene.sceneIndex}: ${error.message}`
+          : locale === "vi"
+            ? `Tạo ảnh cho cảnh ${scene.sceneIndex} thất bại`
+            : `Failed to generate image for scene ${scene.sceneIndex}`,
         { variant: "error" },
       );
     } finally {
@@ -303,7 +336,10 @@ export function App() {
     );
     if (!imageAsset) {
       enqueueSnackbar(
-        "Generate or link a scene image before creating a video.",
+        t(
+          "Generate or link a scene image before creating a video.",
+          "Hãy tạo hoặc liên kết ảnh cảnh trước khi tạo video.",
+        ),
         { variant: "warning" },
       );
       return;
@@ -313,14 +349,21 @@ export function App() {
     try {
       await electronApi.scenes.generateVideo(scene.id, imageAsset.id);
       if (workspace) await refreshWorkspace(workspace.project.id);
-      enqueueSnackbar(`Generated video for scene ${scene.sceneIndex}`, {
-        variant: "success",
-      });
+      enqueueSnackbar(
+        locale === "vi"
+          ? `Đã tạo video cho cảnh ${scene.sceneIndex}`
+          : `Generated video for scene ${scene.sceneIndex}`,
+        { variant: "success" },
+      );
     } catch (error) {
       enqueueSnackbar(
         error instanceof Error
-          ? `Failed to generate video for scene ${scene.sceneIndex}: ${error.message}`
-          : `Failed to generate video for scene ${scene.sceneIndex}`,
+          ? locale === "vi"
+            ? `Tạo video cho cảnh ${scene.sceneIndex} thất bại: ${error.message}`
+            : `Failed to generate video for scene ${scene.sceneIndex}: ${error.message}`
+          : locale === "vi"
+            ? `Tạo video cho cảnh ${scene.sceneIndex} thất bại`
+            : `Failed to generate video for scene ${scene.sceneIndex}`,
         { variant: "error" },
       );
     } finally {
@@ -354,10 +397,17 @@ export function App() {
       selectedAssetIds,
     );
     if (!location) {
-      enqueueSnackbar("Download cancelled.", { variant: "info" });
+      enqueueSnackbar(t("Download cancelled.", "Đã hủy tải xuống."), {
+        variant: "info",
+      });
       return;
     }
-    enqueueSnackbar(`Saved selected assets to ${location}`, { variant: "success" });
+    enqueueSnackbar(
+      locale === "vi"
+        ? `Đã lưu các tài nguyên đã chọn vào ${location}`
+        : `Saved selected assets to ${location}`,
+      { variant: "success" },
+    );
   }
 
   async function exportSrt() {
@@ -366,15 +416,25 @@ export function App() {
       workspace.project.id,
     );
     if (!filePath) {
-      enqueueSnackbar("SRT export cancelled.", { variant: "info" });
+      enqueueSnackbar(t("SRT export cancelled.", "Đã hủy xuất SRT."), {
+        variant: "info",
+      });
       return;
     }
-    enqueueSnackbar(`SRT exported: ${filePath}`, { variant: "success" });
+    enqueueSnackbar(
+      locale === "vi" ? `Đã xuất SRT: ${filePath}` : `SRT exported: ${filePath}`,
+      { variant: "success" },
+    );
   }
 
   async function copyPromptToClipboard(label: string, value: string) {
     await navigator.clipboard.writeText(value);
-    enqueueSnackbar(`${label} copied to clipboard.`, { variant: "success" });
+    enqueueSnackbar(
+      locale === "vi"
+        ? `Đã sao chép ${label} vào bộ nhớ tạm.`
+        : `${label} copied to clipboard.`,
+      { variant: "success" },
+    );
   }
 
   function updateTaskMapping(
@@ -396,7 +456,10 @@ export function App() {
 
   function handleOpenCreateProject() {
     if (!settings) {
-      enqueueSnackbar("Settings are not loaded yet.", { variant: "warning" });
+      enqueueSnackbar(
+        t("Settings are not loaded yet.", "Cài đặt chưa được tải."),
+        { variant: "warning" },
+      );
       return;
     }
 
@@ -407,7 +470,10 @@ export function App() {
 
     if (!provider || !model || !providerKey) {
       enqueueSnackbar(
-        'Cannot create project: please configure "Generate Script" provider/model and API key in Settings.',
+        t(
+          'Cannot create project: please configure "Generate Script" provider/model and API key in Settings.',
+          'Không thể tạo dự án: vui lòng cấu hình provider/model của "Generate Script" và API key trong phần Cài đặt.',
+        ),
         { variant: "error" },
       );
       return;
@@ -423,15 +489,16 @@ export function App() {
           <section className="panel empty-state">
             <h2>Bridge unavailable</h2>
             <p>
-              Failed to load Electron preload bridge (`window.electronApi`).
-              The app is retrying automatically. If this persists, restart dev
-              server and Electron.
+              {t(
+                "Failed to load Electron preload bridge (`window.electronApi`). The app is retrying automatically. If this persists, restart dev server and Electron.",
+                "Không thể tải cầu nối preload của Electron (`window.electronApi`). Ứng dụng đang tự thử lại. Nếu lỗi vẫn còn, hãy khởi động lại dev server và Electron.",
+              )}
             </p>
             <button
               className="btn"
               onClick={() => window.location.reload()}
             >
-              Retry Now
+              {t("Retry Now", "Thử lại ngay")}
             </button>
           </section>
         </main>
@@ -444,7 +511,7 @@ export function App() {
       <aside className="sidebar panel">
         <div className="brand-block">
           <h1>AI Creator</h1>
-          <p className="muted">Desktop Studio</p>
+          <p className="muted">{t("Desktop Studio", "Studio Desktop")}</p>
         </div>
 
         <div className="nav-stack">
@@ -455,7 +522,7 @@ export function App() {
               setWorkspace(null);
             }}
           >
-            Workspace
+            {t("Workspace", "Không gian làm việc")}
           </button>
         </div>
 
@@ -464,7 +531,7 @@ export function App() {
             className="btn btn-primary"
             onClick={handleOpenCreateProject}
           >
-            + New Project
+            {t("+ New Project", "+ Dự án mới")}
           </button>
         </div>
 
@@ -472,8 +539,8 @@ export function App() {
           <button
             className={`btn btn-icon ${activePage === "settings" ? "active" : ""}`}
             onClick={() => setActivePage("settings")}
-            title="Settings"
-            aria-label="Settings"
+            title={t("Settings", "Cài đặt")}
+            aria-label={t("Settings", "Cài đặt")}
           >
             ⚙
           </button>
@@ -484,15 +551,15 @@ export function App() {
         {activePage === "settings" && (
           <section className="settings-panel panel">
             <div className="section-head">
-              <h2>Global Settings</h2>
+              <h2>{t("Global Settings", "Cài đặt toàn cục")}</h2>
               <div className="inline-row">
-                {busy && <span className="pill">Working...</span>}
+                {busy && <span className="pill">{t("Working...", "Đang xử lý...")}</span>}
                 <button
                   className="btn btn-primary"
                   onClick={handleSaveSettings}
                   disabled={!settings || busy}
                 >
-                  Save Settings
+                  {t("Save Settings", "Lưu cài đặt")}
                 </button>
               </div>
             </div>
@@ -500,12 +567,14 @@ export function App() {
               <>
                 <div className="panel-subtle empty-state">
                   <p>
-                    These settings are global for the entire app (all projects):
-                    language, provider API keys, and provider/model task mapping.
+                    {t(
+                      "These settings are global for the entire app (all projects): language, provider API keys, and provider/model task mapping.",
+                      "Các cài đặt này áp dụng toàn cục cho toàn bộ ứng dụng (mọi dự án): ngôn ngữ, API key của provider, và mapping provider/model theo tác vụ.",
+                    )}
                   </p>
                 </div>
                 <label>
-                  App Language
+                  {t("App Language", "Ngôn ngữ ứng dụng")}
                   <select
                     value={settings.language}
                     onChange={(event) =>
@@ -517,7 +586,9 @@ export function App() {
                   >
                     {languageOptions.map((option) => (
                       <option key={option.value} value={option.value}>
-                        {option.label}
+                        {option.value === "en"
+                          ? t("English", "Tiếng Anh")
+                          : t("Vietnamese", "Tiếng Việt")}
                       </option>
                     ))}
                   </select>
@@ -526,7 +597,7 @@ export function App() {
                 <div className="provider-keys">
                   {providers.map((provider) => (
                     <label key={provider.value}>
-                      {provider.label} Global API Key
+                      {provider.label} {t("Global API Key", "API Key toàn cục")}
                       <div className="inline-row">
                         <input
                           type="password"
@@ -547,7 +618,7 @@ export function App() {
                             void handleValidateProvider(provider.value)
                           }
                         >
-                          Validate
+                          {t("Validate", "Kiểm tra")}
                         </button>
                       </div>
                     </label>
@@ -603,7 +674,10 @@ export function App() {
                         settings.taskModelMappings[task].provider
                       ]?.length ?? 0) === 0 ? (
                         <option value={settings.taskModelMappings[task].model}>
-                          No models loaded for this provider
+                          {t(
+                            "No models loaded for this provider",
+                            "Chưa có model nào được tải cho provider này",
+                          )}
                         </option>
                       ) : (
                         (settings.providerModels[
@@ -622,7 +696,7 @@ export function App() {
             {!settings && (
               <div className="panel-subtle empty-state">
                 <p>
-                  Settings are not available yet.
+                  {t("Settings are not available yet.", "Chưa có cài đặt khả dụng.")}
                   {settingsLoadError ? ` ${settingsLoadError}` : ""}
                 </p>
                 <button
@@ -630,7 +704,7 @@ export function App() {
                   onClick={() => void refreshSettings()}
                   disabled={busy}
                 >
-                  Retry Loading Settings
+                  {t("Retry Loading Settings", "Tải lại cài đặt")}
                 </button>
               </div>
             )}
@@ -640,11 +714,14 @@ export function App() {
         {activePage === "workspace" && !workspace && (
           <section className="workspace panel workspace-projects">
             <div className="section-head">
-              <h2>Projects</h2>
+              <h2>{t("Projects", "Dự án")}</h2>
               <span className="pill">{projects.length}</span>
             </div>
             <p className="muted">
-              Select a project to open Characters, Scenes, and Transcript tabs.
+              {t(
+                "Select a project to open Characters, Scenes, and Transcript tabs.",
+                "Chọn một dự án để mở các tab Nhân vật, Cảnh và Lời thoại.",
+              )}
             </p>
             <div className="workspace-project-grid">
               {projects.map((project) => (
@@ -668,11 +745,11 @@ export function App() {
           <section className="modal">
             <div className="modal-card panel">
               <div className="section-head">
-                <h2>Create Project</h2>
-                <span className="pill">Step 1 Setup</span>
+                <h2>{t("Create Project", "Tạo dự án")}</h2>
+                <span className="pill">{t("Step 1 Setup", "Thiết lập Bước 1")}</span>
               </div>
               <label>
-                Title
+                {t("Title", "Tiêu đề")}
                 <input
                   value={projectForm.title}
                   onChange={(event) =>
@@ -684,7 +761,7 @@ export function App() {
                 />
               </label>
               <label>
-                Content (ORIGINAL_CONTENT)
+                {t("Content (ORIGINAL_CONTENT)", "Nội dung (ORIGINAL_CONTENT)")}
                 <textarea
                   value={projectForm.originalContent}
                   rows={6}
@@ -698,7 +775,7 @@ export function App() {
               </label>
               <div className="two-col">
                 <label>
-                  Prompt Language
+                  {t("Prompt Language", "Ngôn ngữ prompt")}
                   <select
                     value={projectForm.promptLanguage}
                     onChange={(event) =>
@@ -715,7 +792,7 @@ export function App() {
                   </select>
                 </label>
                 <label>
-                  Story Language
+                  {t("Story Language", "Ngôn ngữ câu chuyện")}
                   <select
                     value={projectForm.transcriptLanguagePolicy}
                     onChange={(event) =>
@@ -732,7 +809,7 @@ export function App() {
                   </select>
                 </label>
                 <label>
-                  Size / Aspect Ratio
+                  {t("Size / Aspect Ratio", "Kích thước / Tỷ lệ")}
                   <div className="aspect-ratio-picker">
                     {aspectRatioPresets.map((preset) => (
                       <button
@@ -764,7 +841,7 @@ export function App() {
                 </label>
               </div>
               <label>
-                Visual Style
+                {t("Visual Style", "Phong cách hình ảnh")}
                 <select
                   value={projectForm.visualStyle}
                   onChange={(event) =>
@@ -782,7 +859,7 @@ export function App() {
                 </select>
               </label>
               <label>
-                Art Direction Hint
+                {t("Art Direction Hint", "Gợi ý định hướng nghệ thuật")}
                 <textarea
                   rows={3}
                   value={projectForm.artDirectionHint}
@@ -800,7 +877,7 @@ export function App() {
                   className="btn"
                   onClick={() => setShowCreateProject(false)}
                 >
-                  Cancel
+                  {t("Cancel", "Hủy")}
                 </button>
                 <button
                   className="btn btn-primary"
@@ -809,7 +886,7 @@ export function App() {
                     busy || !projectForm.title || !projectForm.originalContent
                   }
                 >
-                  Create + Generate Step 1
+                  {t("Create + Generate Step 1", "Tạo + Sinh Bước 1")}
                 </button>
               </div>
             </div>
@@ -827,28 +904,32 @@ export function App() {
                 </p>
               </div>
               <div className="inline-row tab-row">
-                {(["Characters", "Scenes", "Transcript"] as const).map(
-                  (tab) => (
-                    <button
-                      key={tab}
-                      className={`btn ${selectedTab === tab ? "active" : ""}`}
-                      onClick={() => setSelectedTab(tab)}
-                    >
-                      {tab}
-                    </button>
-                  ),
-                )}
+                {(["Characters", "Scenes", "Transcript"] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    className={`btn ${selectedTab === tab ? "active" : ""}`}
+                    onClick={() => setSelectedTab(tab)}
+                  >
+                    {tab === "Characters"
+                      ? t("Characters", "Nhân vật")
+                      : tab === "Scenes"
+                        ? t("Scenes", "Cảnh")
+                        : t("Transcript", "Lời thoại")}
+                  </button>
+                ))}
               </div>
             </header>
 
             <div className="download-strip">
-              <p>{selectedAssetIds.length} assets selected</p>
+              <p>
+                {selectedAssetIds.length} {t("assets selected", "tài nguyên đã chọn")}
+              </p>
               <button
                 className="btn"
                 onClick={() => void downloadSelected()}
                 disabled={selectedAssetIds.length === 0}
               >
-                Download Selected
+                {t("Download Selected", "Tải đã chọn")}
               </button>
             </div>
 
@@ -868,6 +949,7 @@ export function App() {
                   )
                 }
                 onGenerateImage={regenerateCharacterImage}
+                locale={locale}
                 onCopyPrompt={(character, prompt) =>
                   void copyPromptToClipboard(`${character.name} prompt`, prompt)
                 }
@@ -890,6 +972,7 @@ export function App() {
                 }
                 onGenerateImage={regenerateSceneImage}
                 onGenerateVideo={generateSceneVideo}
+                locale={locale}
                 onUpdatePrompts={updateScenePrompts}
                 onCopyTextPrompt={(scene, prompt) =>
                   void copyPromptToClipboard(
@@ -911,6 +994,7 @@ export function App() {
                 transcripts={workspace.transcripts}
                 untimedTranscript={untimedTranscript}
                 onExportSrt={exportSrt}
+                locale={locale}
               />
             )}
           </section>
@@ -953,7 +1037,9 @@ function CharactersView(props: {
   onToggleAsset: (assetId: string) => void;
   onGenerateImage: (character: Character) => void;
   onCopyPrompt: (character: Character, prompt: string) => void;
+  locale: "en" | "vi";
 }) {
+  const t = (en: string, vi: string) => (props.locale === "vi" ? vi : en);
   return (
     <div className="entity-grid">
       {props.characters.map((character) => {
@@ -964,7 +1050,7 @@ function CharactersView(props: {
 
         return (
           <article key={character.id} className="entity-card panel-subtle">
-            <h3>{character.name} Prompt</h3>
+            <h3>{character.name} {t("Prompt", "Prompt")}</h3>
             <div className="character-layout">
               <div className="character-preview">
                 {imageAsset ? (
@@ -988,12 +1074,12 @@ function CharactersView(props: {
                         checked={props.selectedAssetIds.includes(imageAsset.id)}
                         onChange={() => props.onToggleAsset(imageAsset.id)}
                       />
-                      image • {imageAsset.model}
+                      {t("image", "ảnh")} • {imageAsset.model}
                     </label>
                   </>
                 ) : (
                   <div className="character-placeholder">
-                    No generated image yet
+                    {t("No generated image yet", "Chưa có ảnh được tạo")}
                   </div>
                 )}
               </div>
@@ -1005,7 +1091,10 @@ function CharactersView(props: {
                     void props.onUpdatePrompt(character, nextValue)
                   }
                   onCopy={() => void props.onCopyPrompt(character, prompt)}
-                  placeholder="Character text-to-image prompt"
+                  placeholder={t(
+                    "Character text-to-image prompt",
+                    "Prompt text-to-image của nhân vật",
+                  )}
                 />
                 <div className="inline-row">
                   <button
@@ -1014,8 +1103,8 @@ function CharactersView(props: {
                     disabled={props.generatingCharacterIds.has(character.id)}
                   >
                     {props.generatingCharacterIds.has(character.id)
-                      ? "Generating..."
-                      : "Generate Image"}
+                      ? t("Generating...", "Đang tạo...")
+                      : t("Generate Image", "Tạo ảnh")}
                   </button>
                 </div>
               </div>
@@ -1043,7 +1132,9 @@ function ScenesView(props: {
   ) => void;
   onCopyTextPrompt: (scene: Scene, prompt: string) => void;
   onCopyVideoPrompt: (scene: Scene, prompt: string) => void;
+  locale: "en" | "vi";
 }) {
+  const t = (en: string, vi: string) => (props.locale === "vi" ? vi : en);
   return (
     <div className="entity-grid">
       {props.scenes.map((scene) => {
@@ -1061,7 +1152,7 @@ function ScenesView(props: {
         return (
           <article key={scene.id} className="entity-card panel-subtle">
             <h3>
-              Scene {scene.sceneIndex}: {scene.title}
+              {t("Scene", "Cảnh")} {scene.sceneIndex}: {scene.title}
             </h3>
             <div className="scene-layout">
               <div className="scene-preview">
@@ -1086,12 +1177,12 @@ function ScenesView(props: {
                         checked={props.selectedAssetIds.includes(assets[0].id)}
                         onChange={() => props.onToggleAsset(assets[0].id)}
                       />
-                      image • {assets[0].model}
+                      {t("image", "ảnh")} • {assets[0].model}
                     </span>
                   </label>
                 ) : (
                   <div className="scene-placeholder">
-                    No generated scene image yet
+                    {t("No generated scene image yet", "Chưa có ảnh cảnh được tạo")}
                   </div>
                 )}
                 {videos[0] && (
@@ -1108,7 +1199,7 @@ function ScenesView(props: {
                         checked={props.selectedAssetIds.includes(videos[0].id)}
                         onChange={() => props.onToggleAsset(videos[0].id)}
                       />
-                      video • {videos[0].model}
+                      {t("video", "video")} • {videos[0].model}
                     </span>
                   </label>
                 )}
@@ -1116,7 +1207,7 @@ function ScenesView(props: {
               <div className="scene-editor">
                 <p>{scene.summary}</p>
                 <div className="refs-highlight">
-                  <strong>Needs refs</strong>
+                  <strong>{t("Needs refs", "Cần ảnh tham chiếu")}</strong>
                   <div className="refs-list">
                     {scene.requiredCharacterRefs.length > 0 ? (
                       scene.requiredCharacterRefs.map((refName) => (
@@ -1125,12 +1216,12 @@ function ScenesView(props: {
                         </span>
                       ))
                     ) : (
-                      <span className="ref-chip ref-chip-empty">None</span>
+                      <span className="ref-chip ref-chip-empty">{t("None", "Không có")}</span>
                     )}
                   </div>
                 </div>
                 <label>
-                  Text to image prompt
+                  {t("Text to image prompt", "Prompt text to image")}
                   <HoverCopyTextarea
                     rows={4}
                     value={textPrompt}
@@ -1145,7 +1236,7 @@ function ScenesView(props: {
                   />
                 </label>
                 <label>
-                  Image to video prompt
+                  {t("Image to video prompt", "Prompt image to video")}
                   <HoverCopyTextarea
                     rows={4}
                     value={videoPrompt}
@@ -1166,14 +1257,14 @@ function ScenesView(props: {
                     disabled={props.generatingSceneIds.has(scene.id)}
                   >
                     {props.generatingSceneIds.has(scene.id)
-                      ? "Generating..."
-                      : "Generate Scene Image"}
+                      ? t("Generating...", "Đang tạo...")
+                      : t("Generate Scene Image", "Tạo ảnh cảnh")}
                   </button>
                   <button
                     className="btn"
                     onClick={() => void props.onGenerateVideo(scene)}
                   >
-                    Generate Video
+                    {t("Generate Video", "Tạo video")}
                   </button>
                 </div>
               </div>
@@ -1204,8 +1295,8 @@ function HoverCopyTextarea(props: {
         type="button"
         className="copy-icon-btn"
         onClick={props.onCopy}
-        aria-label="Copy to clipboard"
-        title="Copy to clipboard"
+        aria-label="copy"
+        title="copy"
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M9 9h11v11H9z" />
@@ -1220,28 +1311,32 @@ function TranscriptView(props: {
   transcripts: TranscriptRow[];
   untimedTranscript: string;
   onExportSrt: () => void;
+  locale: "en" | "vi";
 }) {
+  const t = (en: string, vi: string) => (props.locale === "vi" ? vi : en);
   return (
     <div className="transcript-view panel-subtle">
       <div className="inline-row">
-        <h3>Transcript</h3>
+        <h3>{t("Transcript", "Lời thoại")}</h3>
         <button
           className="btn"
           onClick={() =>
             void navigator.clipboard.writeText(props.untimedTranscript)
           }
         >
-          Copy Untimed Transcript
+          {t("Copy Untimed Transcript", "Sao chép lời thoại không thời gian")}
         </button>
         <button className="btn" onClick={() => void props.onExportSrt()}>
-          Export .srt
+          {t("Export .srt", "Xuất .srt")}
         </button>
       </div>
       <textarea readOnly rows={8} value={props.untimedTranscript} />
       <div className="table-like">
         {props.transcripts.map((row) => (
           <div key={row.id} className="table-row">
-            <span>Scene {row.scene}</span>
+            <span>
+              {t("Scene", "Cảnh")} {row.scene}
+            </span>
             <span>{row.speaker}</span>
             <span>
               {row.startSec} - {row.endSec}
