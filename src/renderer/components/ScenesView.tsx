@@ -47,7 +47,7 @@ export function ScenesView(props: {
             <div className="scene-layout">
               <div className="scene-preview">
                 {assets[0] ? (
-                  <label className="media-card">
+                  <div className="media-card">
                     <img
                       src={props.toRenderableSrc(assets[0].filePath)}
                       alt={`Scene ${scene.sceneIndex} generated`}
@@ -69,7 +69,7 @@ export function ScenesView(props: {
                       />
                       {t("image", "ảnh")} • {assets[0].model}
                     </span>
-                  </label>
+                  </div>
                 ) : (
                   <div className="scene-placeholder">
                     {t(
@@ -79,7 +79,7 @@ export function ScenesView(props: {
                   </div>
                 )}
                 {videos[0] && (
-                  <label className="media-card">
+                  <div className="media-card">
                     <video
                       src={props.toRenderableSrc(videos[0].filePath)}
                       className="media-thumb"
@@ -94,7 +94,7 @@ export function ScenesView(props: {
                       />
                       {t("video", "video")} • {videos[0].model}
                     </span>
-                  </label>
+                  </div>
                 )}
               </div>
               <div className="scene-editor">

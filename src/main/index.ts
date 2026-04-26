@@ -6,6 +6,19 @@ import { registerIpc } from './ipc';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'local-asset',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      stream: true,
+      corsEnabled: true
+    }
+  }
+]);
+
 function resolveAppIconPath(): string | undefined {
   const iconCandidates = [
     join(__dirname, '../../src/assets/icons/app.png'),
@@ -99,7 +112,7 @@ app.whenReady().then(() => {
         }
 
         const chunk = readFileSync(assetPath).subarray(start, end + 1);
-        return new Response(chunk, {
+        return new Response(request.method === 'HEAD' ? null : chunk, {
           status: 206,
           headers: {
             'Content-Type': mimeType,
@@ -112,7 +125,7 @@ app.whenReady().then(() => {
       }
 
       const bytes = readFileSync(assetPath);
-      return new Response(bytes, {
+      return new Response(request.method === 'HEAD' ? null : bytes, {
         status: 200,
         headers: {
           'Content-Type': mimeType,
