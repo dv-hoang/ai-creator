@@ -1,32 +1,42 @@
-import { app } from 'electron';
-import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { app } from "electron";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import type {
   AppSettings,
   AssetRecord,
   Character,
+  ProviderConfig,
   ProjectInput,
   ProjectRecord,
   ProjectWorkspace,
   Scene,
-  TranscriptRow
-} from '@shared/types';
+  TranscriptRow,
+} from "@shared/types";
+
+const supportedProviderNames: ProviderConfig["name"][] = [
+  "openai",
+  "gemini",
+  "fal",
+  "elevenlabs",
+];
 
 const defaultSettings: AppSettings = {
-  language: 'en',
-  providerKeys: {},
+  language: "en",
+  providers: [],
+  elevenLabsVoiceId: "d5HVupAWCwe4e6GvMCAL",
   providerModels: {},
   taskModelMappings: {
-    generateScript: { provider: 'openai', model: 'gpt-5-mini' },
-    generateImage: { provider: 'gemini', model: 'banana-2' },
-    generateVideo: { provider: 'openai', model: 'veo-3' }
+    generateScript: { provider: "openai", model: "gpt-5-mini" },
+    generateImage: { provider: "fal", model: "fal-ai/flux/schnell" },
+    generateVideo: { provider: "openai", model: "veo-3" },
+    textToSpeech: { provider: "elevenlabs", model: "eleven-v3" },
   },
   generationEnabled: {
     generateImage: true,
-    generateVideo: true
-  }
+    generateVideo: true,
+  },
 };
 
 interface Step1OutputRecord {
@@ -52,8 +62,8 @@ interface ProjectData {
 }
 
 let dataStore: AppData | null = null;
-let dataFilePath = '';
-let secretFilePath = '';
+let dataFilePath = "";
+let secretFilePath = "";
 let secretKey: Buffer | null = null;
 const projectStore = new Map<string, ProjectData>();
 
@@ -64,18 +74,18 @@ function nowIso(): string {
 function defaultData(): AppData {
   return {
     settings: defaultSettings,
-    projects: []
+    projects: [],
   };
 }
 
 function normalizeProjectRecord(project: ProjectRecord): ProjectRecord {
   const normalizedStatusDetail =
-    project.status === 'error'
-      ? project.statusDetail?.trim() || 'Unknown generation error'
+    project.status === "error"
+      ? project.statusDetail?.trim() || "Unknown generation error"
       : null;
   return {
     ...project,
-    statusDetail: normalizedStatusDetail
+    statusDetail: normalizedStatusDetail,
   };
 }
 
@@ -85,19 +95,23 @@ function defaultProjectData(): ProjectData {
     characters: [],
     scenes: [],
     transcripts: [],
-    assets: []
+    assets: [],
   };
 }
 
 function resolveDataFilePath(): string {
-  const baseDir = app.isPackaged ? join(app.getPath('userData'), 'data') : join(process.cwd(), 'data');
+  const baseDir = app.isPackaged
+    ? join(app.getPath("userData"), "data")
+    : join(process.cwd(), "data");
   mkdirSync(baseDir, { recursive: true });
-  return join(baseDir, 'ai-creator.json');
+  return join(baseDir, "ai-creator.json");
 }
 
 function resolveProjectsRootDir(): string {
-  const baseDir = app.isPackaged ? join(app.getPath('userData'), 'data') : join(process.cwd(), 'data');
-  const projectsDir = join(baseDir, 'projects');
+  const baseDir = app.isPackaged
+    ? join(app.getPath("userData"), "data")
+    : join(process.cwd(), "data");
+  const projectsDir = join(baseDir, "projects");
   mkdirSync(projectsDir, { recursive: true });
   return projectsDir;
 }
@@ -109,13 +123,15 @@ function getProjectDataDir(projectId: string): string {
 }
 
 function getProjectDataFilePath(projectId: string): string {
-  return join(getProjectDataDir(projectId), 'project-data.json');
+  return join(getProjectDataDir(projectId), "project-data.json");
 }
 
 function resolveSecretFilePath(): string {
-  const baseDir = app.isPackaged ? join(app.getPath('userData'), 'data') : join(process.cwd(), 'data');
+  const baseDir = app.isPackaged
+    ? join(app.getPath("userData"), "data")
+    : join(process.cwd(), "data");
   mkdirSync(baseDir, { recursive: true });
-  return join(baseDir, 'secret.key');
+  return join(baseDir, "secret.key");
 }
 
 function loadOrCreateSecretKey(): Buffer {
@@ -128,18 +144,18 @@ function loadOrCreateSecretKey(): Buffer {
   }
 
   if (!existsSync(secretFilePath)) {
-    const generated = randomBytes(32).toString('base64');
-    writeFileSync(secretFilePath, generated, 'utf8');
-    secretKey = Buffer.from(generated, 'base64');
+    const generated = randomBytes(32).toString("base64");
+    writeFileSync(secretFilePath, generated, "utf8");
+    secretKey = Buffer.from(generated, "base64");
     return secretKey;
   }
 
-  const raw = readFileSync(secretFilePath, 'utf8').trim();
-  const parsed = Buffer.from(raw, 'base64');
+  const raw = readFileSync(secretFilePath, "utf8").trim();
+  const parsed = Buffer.from(raw, "base64");
   if (parsed.length !== 32) {
-    const generated = randomBytes(32).toString('base64');
-    writeFileSync(secretFilePath, generated, 'utf8');
-    secretKey = Buffer.from(generated, 'base64');
+    const generated = randomBytes(32).toString("base64");
+    writeFileSync(secretFilePath, generated, "utf8");
+    secretKey = Buffer.from(generated, "base64");
     return secretKey;
   }
 
@@ -149,26 +165,29 @@ function loadOrCreateSecretKey(): Buffer {
 
 function encryptSecret(plainText: string): string {
   if (!plainText) {
-    return '';
+    return "";
   }
   const key = loadOrCreateSecretKey();
   const iv = randomBytes(12);
-  const cipher = createCipheriv('aes-256-gcm', key, iv);
-  const encrypted = Buffer.concat([cipher.update(plainText, 'utf8'), cipher.final()]);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  const encrypted = Buffer.concat([
+    cipher.update(plainText, "utf8"),
+    cipher.final(),
+  ]);
   const tag = cipher.getAuthTag();
-  return `enc:v1:${Buffer.concat([iv, tag, encrypted]).toString('base64')}`;
+  return `enc:v1:${Buffer.concat([iv, tag, encrypted]).toString("base64")}`;
 }
 
 function decryptSecret(encoded: string): string {
   if (!encoded) {
-    return '';
+    return "";
   }
-  if (!encoded.startsWith('enc:v1:')) {
+  if (!encoded.startsWith("enc:v1:")) {
     return encoded;
   }
-  const payload = Buffer.from(encoded.slice('enc:v1:'.length), 'base64');
+  const payload = Buffer.from(encoded.slice("enc:v1:".length), "base64");
   if (payload.length < 12 + 16) {
-    return '';
+    return "";
   }
   const key = loadOrCreateSecretKey();
   const iv = payload.subarray(0, 12);
@@ -176,47 +195,91 @@ function decryptSecret(encoded: string): string {
   const data = payload.subarray(28);
 
   try {
-    const decipher = createDecipheriv('aes-256-gcm', key, iv);
+    const decipher = createDecipheriv("aes-256-gcm", key, iv);
     decipher.setAuthTag(tag);
     const decrypted = Buffer.concat([decipher.update(data), decipher.final()]);
-    return decrypted.toString('utf8');
+    return decrypted.toString("utf8");
   } catch {
-    return '';
+    return "";
   }
 }
 
 function decodeSettings(settings: AppSettings): AppSettings {
-  const decodedProviderKeys = Object.fromEntries(
-    Object.entries(settings.providerKeys).map(([provider, key]) => [provider, decryptSecret(key ?? '')])
-  ) as AppSettings['providerKeys'];
+  const decodedProviders = settings.providers.map((provider) => ({
+    ...provider,
+    apiKey: decryptSecret(provider.apiKey ?? ""),
+  }));
 
   return {
     ...settings,
-    providerKeys: decodedProviderKeys
+    providers: decodedProviders,
+    elevenLabsVoiceId:
+      (settings.elevenLabsVoiceId ?? "").trim() ||
+      defaultSettings.elevenLabsVoiceId,
   };
 }
 
 function encodeSettings(settings: AppSettings): AppSettings {
-  const encodedProviderKeys = Object.fromEntries(
-    Object.entries(settings.providerKeys).map(([provider, key]) => [provider, encryptSecret((key ?? '').trim())])
-  ) as AppSettings['providerKeys'];
+  const encodedProviders = settings.providers.map((provider) => ({
+    ...provider,
+    apiKey: encryptSecret((provider.apiKey ?? "").trim()),
+  }));
 
   return {
     ...settings,
-    providerKeys: encodedProviderKeys
+    providers: encodedProviders,
+    elevenLabsVoiceId:
+      (settings.elevenLabsVoiceId ?? "").trim() ||
+      defaultSettings.elevenLabsVoiceId,
   };
+}
+
+function normalizeTaskModelMappings(
+  rawMappings: unknown,
+): AppSettings["taskModelMappings"] {
+  const defaults = defaultSettings.taskModelMappings;
+  const candidate =
+    rawMappings && typeof rawMappings === "object"
+      ? (rawMappings as Partial<AppSettings["taskModelMappings"]>)
+      : {};
+
+  const normalized = { ...defaults };
+  (
+    Object.keys(defaults) as Array<keyof AppSettings["taskModelMappings"]>
+  ).forEach((task) => {
+    const mapping = candidate[task];
+    if (!mapping || typeof mapping !== "object") {
+      return;
+    }
+
+    const provider = "provider" in mapping ? mapping.provider : undefined;
+    const model = "model" in mapping ? mapping.model : undefined;
+    if (
+      typeof provider === "string" &&
+      supportedProviderNames.includes(provider as ProviderConfig["name"]) &&
+      typeof model === "string" &&
+      model.trim()
+    ) {
+      normalized[task] = {
+        provider: provider as ProviderConfig["name"],
+        model: model.trim(),
+      };
+    }
+  });
+
+  return normalized;
 }
 
 function saveData(): void {
   if (!dataStore) {
     return;
   }
-  writeFileSync(dataFilePath, JSON.stringify(dataStore, null, 2), 'utf8');
+  writeFileSync(dataFilePath, JSON.stringify(dataStore, null, 2), "utf8");
 }
 
 function saveProjectData(projectId: string, projectData: ProjectData): void {
   const filePath = getProjectDataFilePath(projectId);
-  writeFileSync(filePath, JSON.stringify(projectData, null, 2), 'utf8');
+  writeFileSync(filePath, JSON.stringify(projectData, null, 2), "utf8");
   projectStore.set(projectId, projectData);
 }
 
@@ -233,25 +296,41 @@ function loadProjectData(projectId: string): ProjectData {
     return initial;
   }
 
-  const raw = readFileSync(filePath, 'utf8');
+  const raw = readFileSync(filePath, "utf8");
   const parsed = JSON.parse(raw) as Partial<ProjectData>;
   const normalized: ProjectData = {
     step1Outputs: parsed.step1Outputs ?? [],
     characters: parsed.characters ?? [],
     scenes: parsed.scenes ?? [],
-    transcripts: parsed.transcripts ?? [],
-    assets: parsed.assets ?? []
+    transcripts: (parsed.transcripts ?? []).map((row) => ({
+      ...row,
+      voiceId: row.voiceId ?? "",
+    })),
+    assets: parsed.assets ?? [],
   };
   projectStore.set(projectId, normalized);
   return normalized;
 }
 
-function migrateLegacyProjectData(parsed: any, projects: ProjectRecord[]): void {
-  const legacyStep1Outputs = Array.isArray(parsed.step1Outputs) ? parsed.step1Outputs as Step1OutputRecord[] : [];
-  const legacyCharacters = Array.isArray(parsed.characters) ? parsed.characters as Character[] : [];
-  const legacyScenes = Array.isArray(parsed.scenes) ? parsed.scenes as Scene[] : [];
-  const legacyTranscripts = Array.isArray(parsed.transcripts) ? parsed.transcripts as TranscriptRow[] : [];
-  const legacyAssets = Array.isArray(parsed.assets) ? parsed.assets as AssetRecord[] : [];
+function migrateLegacyProjectData(
+  parsed: any,
+  projects: ProjectRecord[],
+): void {
+  const legacyStep1Outputs = Array.isArray(parsed.step1Outputs)
+    ? (parsed.step1Outputs as Step1OutputRecord[])
+    : [];
+  const legacyCharacters = Array.isArray(parsed.characters)
+    ? (parsed.characters as Character[])
+    : [];
+  const legacyScenes = Array.isArray(parsed.scenes)
+    ? (parsed.scenes as Scene[])
+    : [];
+  const legacyTranscripts = Array.isArray(parsed.transcripts)
+    ? (parsed.transcripts as TranscriptRow[])
+    : [];
+  const legacyAssets = Array.isArray(parsed.assets)
+    ? (parsed.assets as AssetRecord[])
+    : [];
 
   if (
     legacyStep1Outputs.length === 0 &&
@@ -266,11 +345,26 @@ function migrateLegacyProjectData(parsed: any, projects: ProjectRecord[]): void 
   for (const project of projects) {
     const projectData = loadProjectData(project.id);
     const merged: ProjectData = {
-      step1Outputs: [...projectData.step1Outputs, ...legacyStep1Outputs.filter((item) => item.projectId === project.id)],
-      characters: [...projectData.characters, ...legacyCharacters.filter((item) => item.projectId === project.id)],
-      scenes: [...projectData.scenes, ...legacyScenes.filter((item) => item.projectId === project.id)],
-      transcripts: [...projectData.transcripts, ...legacyTranscripts.filter((item) => item.projectId === project.id)],
-      assets: [...projectData.assets, ...legacyAssets.filter((item) => item.projectId === project.id)]
+      step1Outputs: [
+        ...projectData.step1Outputs,
+        ...legacyStep1Outputs.filter((item) => item.projectId === project.id),
+      ],
+      characters: [
+        ...projectData.characters,
+        ...legacyCharacters.filter((item) => item.projectId === project.id),
+      ],
+      scenes: [
+        ...projectData.scenes,
+        ...legacyScenes.filter((item) => item.projectId === project.id),
+      ],
+      transcripts: [
+        ...projectData.transcripts,
+        ...legacyTranscripts.filter((item) => item.projectId === project.id),
+      ],
+      assets: [
+        ...projectData.assets,
+        ...legacyAssets.filter((item) => item.projectId === project.id),
+      ],
     };
     saveProjectData(project.id, merged);
   }
@@ -288,22 +382,109 @@ function loadData(): AppData {
     return dataStore;
   }
 
-  const raw = readFileSync(dataFilePath, 'utf8');
+  const raw = readFileSync(dataFilePath, "utf8");
   const parsed = JSON.parse(raw) as Partial<AppData> & Record<string, unknown>;
   const projects = (parsed.projects ?? []).map((project) =>
-    normalizeProjectRecord(project as ProjectRecord)
+    normalizeProjectRecord(project as ProjectRecord),
   );
+  const parsedProvidersRaw = parsed.settings?.providers;
+  const parsedProviderKeys = (
+    parsed.settings as { providerKeys?: Record<string, string> } | undefined
+  )?.providerKeys;
+
+  const providersFromRecords: ProviderConfig[] = Array.isArray(
+    parsedProvidersRaw,
+  )
+    ? parsedProvidersRaw.flatMap((provider) => {
+        if (
+          provider &&
+          typeof provider === "object" &&
+          "name" in provider &&
+          "apiKey" in provider &&
+          typeof provider.name === "string" &&
+          typeof provider.apiKey === "string" &&
+          supportedProviderNames.includes(
+            provider.name as ProviderConfig["name"],
+          )
+        ) {
+          return [
+            {
+              name: provider.name as ProviderConfig["name"],
+              apiKey: provider.apiKey,
+            },
+          ];
+        }
+        return [];
+      })
+    : [];
+
+  const providersFromLegacyNames: ProviderConfig[] = Array.isArray(
+    parsedProvidersRaw,
+  )
+    ? parsedProvidersRaw.flatMap((providerName) => {
+        if (
+          typeof providerName !== "string" ||
+          !supportedProviderNames.includes(
+            providerName as ProviderConfig["name"],
+          )
+        ) {
+          return [];
+        }
+        return [
+          {
+            name: providerName as ProviderConfig["name"],
+            apiKey: parsedProviderKeys?.[providerName] ?? "",
+          },
+        ];
+      })
+    : [];
+
+  const providersFromLegacyKeys: ProviderConfig[] = parsedProviderKeys
+    ? Object.entries(parsedProviderKeys).flatMap(([providerName, apiKey]) => {
+        if (
+          !supportedProviderNames.includes(
+            providerName as ProviderConfig["name"],
+          )
+        ) {
+          return [];
+        }
+        return [
+          {
+            name: providerName as ProviderConfig["name"],
+            apiKey: apiKey ?? "",
+          },
+        ];
+      })
+    : [];
+
+  const dedupedProvidersByName = new Map<
+    ProviderConfig["name"],
+    ProviderConfig
+  >();
+  [
+    ...providersFromLegacyKeys,
+    ...providersFromLegacyNames,
+    ...providersFromRecords,
+  ].forEach((provider) => {
+    dedupedProvidersByName.set(provider.name, provider);
+  });
+  const normalizedProviders = [...dedupedProvidersByName.values()];
+
   dataStore = {
     settings: {
       ...defaultSettings,
       ...(parsed.settings ?? {}),
+      providers: normalizedProviders,
       providerModels: parsed.settings?.providerModels ?? {},
+      taskModelMappings: normalizeTaskModelMappings(
+        parsed.settings?.taskModelMappings,
+      ),
       generationEnabled: {
         ...defaultSettings.generationEnabled,
-        ...(parsed.settings?.generationEnabled ?? {})
-      }
+        ...(parsed.settings?.generationEnabled ?? {}),
+      },
     },
-    projects
+    projects,
   };
   migrateLegacyProjectData(parsed, projects);
   for (const project of projects) {
@@ -325,7 +506,24 @@ export function getSettings(): AppSettings {
 
 export function saveSettings(settings: AppSettings): AppSettings {
   const data = loadData();
-  data.settings = encodeSettings(settings);
+  const dedupedProvidersByName = new Map<
+    ProviderConfig["name"],
+    ProviderConfig
+  >();
+  settings.providers.forEach((provider) => {
+    if (!supportedProviderNames.includes(provider.name)) {
+      return;
+    }
+    dedupedProvidersByName.set(provider.name, {
+      name: provider.name,
+      apiKey: provider.apiKey,
+    });
+  });
+  data.settings = encodeSettings({
+    ...settings,
+    providers: [...dedupedProvidersByName.values()],
+    taskModelMappings: normalizeTaskModelMappings(settings.taskModelMappings),
+  });
   saveData();
   return decodeSettings(data.settings);
 }
@@ -334,11 +532,11 @@ export function createProject(input: ProjectInput): ProjectRecord {
   const data = loadData();
   const project: ProjectRecord = {
     id: randomUUID(),
-    status: 'processing',
+    status: "processing",
     statusDetail: null,
     createdAt: nowIso(),
     updatedAt: nowIso(),
-    ...input
+    ...input,
   };
 
   data.projects.push(project);
@@ -349,18 +547,20 @@ export function createProject(input: ProjectInput): ProjectRecord {
 
 export function updateProjectStatus(
   projectId: string,
-  status: ProjectRecord['status'],
-  statusDetail?: string | null
+  status: ProjectRecord["status"],
+  statusDetail?: string | null,
 ): void {
   const data = loadData();
   const project = data.projects.find((item) => item.id === projectId);
   if (!project) {
-    throw new Error('Project not found');
+    throw new Error("Project not found");
   }
 
   project.status = status;
-  if (status === 'error') {
-    project.statusDetail = statusDetail?.trim() ? statusDetail.trim() : 'Unknown generation error';
+  if (status === "error") {
+    project.statusDetail = statusDetail?.trim()
+      ? statusDetail.trim()
+      : "Unknown generation error";
   } else {
     project.statusDetail = null;
   }
@@ -369,13 +569,15 @@ export function updateProjectStatus(
 }
 
 export function listProjects(): ProjectRecord[] {
-  return [...loadData().projects].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  return [...loadData().projects].sort((a, b) =>
+    a.createdAt < b.createdAt ? 1 : -1,
+  );
 }
 
 export function getProject(projectId: string): ProjectRecord {
   const project = loadData().projects.find((item) => item.id === projectId);
   if (!project) {
-    throw new Error('Project not found');
+    throw new Error("Project not found");
   }
   return project;
 }
@@ -386,7 +588,11 @@ export function resetProjectWorkspaceForRegeneration(projectId: string): void {
   saveProjectData(projectId, defaultProjectData());
 }
 
-export function saveStep1Output(projectId: string, rawResponse: string, normalizedJson: string): void {
+export function saveStep1Output(
+  projectId: string,
+  rawResponse: string,
+  normalizedJson: string,
+): void {
   const projectData = loadProjectData(projectId);
   projectData.step1Outputs.push({
     id: randomUUID(),
@@ -394,24 +600,29 @@ export function saveStep1Output(projectId: string, rawResponse: string, normaliz
     rawResponse,
     normalizedJson,
     version: 1,
-    createdAt: nowIso()
+    createdAt: nowIso(),
   });
   saveProjectData(projectId, projectData);
 }
 
-export function saveCharacters(characters: Omit<Character, 'id'>[]): Character[] {
+export function saveCharacters(
+  characters: Omit<Character, "id">[],
+): Character[] {
   if (characters.length === 0) {
     return [];
   }
   const projectId = characters[0].projectId;
   const projectData = loadProjectData(projectId);
-  const records = characters.map((character) => ({ ...character, id: randomUUID() }));
+  const records = characters.map((character) => ({
+    ...character,
+    id: randomUUID(),
+  }));
   projectData.characters.push(...records);
   saveProjectData(projectId, projectData);
   return records;
 }
 
-export function saveScenes(scenes: Omit<Scene, 'id'>[]): Scene[] {
+export function saveScenes(scenes: Omit<Scene, "id">[]): Scene[] {
   if (scenes.length === 0) {
     return [];
   }
@@ -423,13 +634,18 @@ export function saveScenes(scenes: Omit<Scene, 'id'>[]): Scene[] {
   return records;
 }
 
-export function saveTranscripts(transcripts: Omit<TranscriptRow, 'id'>[]): TranscriptRow[] {
+export function saveTranscripts(
+  transcripts: Omit<TranscriptRow, "id">[],
+): TranscriptRow[] {
   if (transcripts.length === 0) {
     return [];
   }
   const projectId = transcripts[0].projectId;
   const projectData = loadProjectData(projectId);
-  const records = transcripts.map((transcript) => ({ ...transcript, id: randomUUID() }));
+  const records = transcripts.map((transcript) => ({
+    ...transcript,
+    id: randomUUID(),
+  }));
   projectData.transcripts.push(...records);
   saveProjectData(projectId, projectData);
   return records;
@@ -444,28 +660,102 @@ export function getWorkspace(projectId: string): ProjectWorkspace {
 }
 
 export function getCharactersByProject(projectId: string): Character[] {
-  return loadProjectData(projectId)
-    .characters
-    .sort((a, b) => a.name.localeCompare(b.name));
+  return loadProjectData(projectId).characters.sort((a, b) =>
+    a.name.localeCompare(b.name),
+  );
 }
 
 export function getScenesByProject(projectId: string): Scene[] {
-  return loadProjectData(projectId)
-    .scenes
-    .sort((a, b) => a.sceneIndex - b.sceneIndex);
+  return loadProjectData(projectId).scenes.sort(
+    (a, b) => a.sceneIndex - b.sceneIndex,
+  );
 }
 
 export function getTranscriptsByProject(projectId: string): TranscriptRow[] {
-  return loadProjectData(projectId)
-    .transcripts
-    .sort((a, b) => (a.scene === b.scene ? a.id.localeCompare(b.id) : a.scene - b.scene));
+  return loadProjectData(projectId).transcripts.sort((a, b) =>
+    a.scene === b.scene ? a.id.localeCompare(b.id) : a.scene - b.scene,
+  );
 }
 
-export function updateCharacterPrompt(characterId: string, prompt: string): Character {
+export function updateTranscriptRow(
+  transcriptId: string,
+  patch: {
+    speaker?: string;
+    text?: string;
+    startSec?: number;
+    endSec?: number;
+    voiceId?: string;
+  },
+): TranscriptRow {
   const projects = listProjects();
   for (const project of projects) {
     const projectData = loadProjectData(project.id);
-    const character = projectData.characters.find((item) => item.id === characterId);
+    const row = projectData.transcripts.find((item) => item.id === transcriptId);
+    if (!row) {
+      continue;
+    }
+
+    if (typeof patch.speaker === "string") {
+      row.speaker = patch.speaker.trim();
+    }
+    if (typeof patch.text === "string") {
+      row.text = patch.text.trim();
+    }
+    if (typeof patch.startSec === "number" && Number.isFinite(patch.startSec)) {
+      row.startSec = patch.startSec;
+    }
+    if (typeof patch.endSec === "number" && Number.isFinite(patch.endSec)) {
+      row.endSec = patch.endSec;
+    }
+    if (typeof patch.voiceId === "string") {
+      row.voiceId = patch.voiceId.trim();
+    }
+    if (row.endSec < row.startSec) {
+      row.endSec = row.startSec;
+    }
+
+    saveProjectData(project.id, projectData);
+    return row;
+  }
+
+  throw new Error("Transcript row not found");
+}
+
+export function updateTranscriptVoiceBySpeaker(
+  projectId: string,
+  speaker: string,
+  voiceId: string,
+): number {
+  const projectData = loadProjectData(projectId);
+  const normalizedSpeaker = speaker.trim();
+  if (!normalizedSpeaker) {
+    return 0;
+  }
+  const normalizedVoiceId = voiceId.trim();
+  let affected = 0;
+  projectData.transcripts.forEach((row) => {
+    if (row.speaker.trim() !== normalizedSpeaker) {
+      return;
+    }
+    row.voiceId = normalizedVoiceId;
+    affected += 1;
+  });
+  if (affected > 0) {
+    saveProjectData(projectId, projectData);
+  }
+  return affected;
+}
+
+export function updateCharacterPrompt(
+  characterId: string,
+  prompt: string,
+): Character {
+  const projects = listProjects();
+  for (const project of projects) {
+    const projectData = loadProjectData(project.id);
+    const character = projectData.characters.find(
+      (item) => item.id === characterId,
+    );
     if (!character) {
       continue;
     }
@@ -473,14 +763,19 @@ export function updateCharacterPrompt(characterId: string, prompt: string): Char
     saveProjectData(project.id, projectData);
     return character;
   }
-  throw new Error('Character not found');
+  throw new Error("Character not found");
 }
 
-export function linkCharacterAsset(characterId: string, assetId: string): Character {
+export function linkCharacterAsset(
+  characterId: string,
+  assetId: string,
+): Character {
   const projects = listProjects();
   for (const project of projects) {
     const projectData = loadProjectData(project.id);
-    const character = projectData.characters.find((item) => item.id === characterId);
+    const character = projectData.characters.find(
+      (item) => item.id === characterId,
+    );
     if (!character) {
       continue;
     }
@@ -488,21 +783,26 @@ export function linkCharacterAsset(characterId: string, assetId: string): Charac
     saveProjectData(project.id, projectData);
     return character;
   }
-  throw new Error('Character not found');
+  throw new Error("Character not found");
 }
 
 export function getCharacter(characterId: string): Character {
   const projects = listProjects();
   for (const project of projects) {
-    const character = loadProjectData(project.id).characters.find((item) => item.id === characterId);
+    const character = loadProjectData(project.id).characters.find(
+      (item) => item.id === characterId,
+    );
     if (character) {
       return character;
     }
   }
-  throw new Error('Character not found');
+  throw new Error("Character not found");
 }
 
-export function updateScenePrompts(sceneId: string, prompts: { textToImage?: string; imageToVideo?: string }): Scene {
+export function updateScenePrompts(
+  sceneId: string,
+  prompts: { textToImage?: string; imageToVideo?: string },
+): Scene {
   const projects = listProjects();
   for (const project of projects) {
     const projectData = loadProjectData(project.id);
@@ -511,25 +811,27 @@ export function updateScenePrompts(sceneId: string, prompts: { textToImage?: str
       continue;
     }
 
-    if (typeof prompts.textToImage === 'string') {
+    if (typeof prompts.textToImage === "string") {
       scene.promptOverrideTextToImage = prompts.textToImage;
     }
-    if (typeof prompts.imageToVideo === 'string') {
+    if (typeof prompts.imageToVideo === "string") {
       scene.promptOverrideImageToVideo = prompts.imageToVideo;
     }
 
     saveProjectData(project.id, projectData);
     return scene;
   }
-  throw new Error('Scene not found');
+  throw new Error("Scene not found");
 }
 
-export function saveAsset(asset: Omit<AssetRecord, 'id' | 'createdAt'>): AssetRecord {
+export function saveAsset(
+  asset: Omit<AssetRecord, "id" | "createdAt">,
+): AssetRecord {
   const projectData = loadProjectData(asset.projectId);
   const record: AssetRecord = {
     ...asset,
     id: randomUUID(),
-    createdAt: nowIso()
+    createdAt: nowIso(),
   };
 
   projectData.assets.push(record);
@@ -538,24 +840,26 @@ export function saveAsset(asset: Omit<AssetRecord, 'id' | 'createdAt'>): AssetRe
 }
 
 export function getAssetsByProject(projectId: string): AssetRecord[] {
-  return loadProjectData(projectId)
-    .assets
-    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  return loadProjectData(projectId).assets.sort((a, b) =>
+    a.createdAt < b.createdAt ? 1 : -1,
+  );
 }
 
 export function getAsset(assetId: string): AssetRecord {
   const projects = listProjects();
   for (const project of projects) {
-    const asset = loadProjectData(project.id).assets.find((item) => item.id === assetId);
+    const asset = loadProjectData(project.id).assets.find(
+      (item) => item.id === assetId,
+    );
     if (asset) {
       return asset;
     }
   }
-  throw new Error('Asset not found');
+  throw new Error("Asset not found");
 }
 
 export function getProjectAssetsDir(projectId: string): string {
-  const directory = join(getProjectDataDir(projectId), 'assets');
+  const directory = join(getProjectDataDir(projectId), "assets");
   mkdirSync(directory, { recursive: true });
   return directory;
 }

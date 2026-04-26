@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { copyFileSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
+import { ElevenLabsClient } from '@elevenlabs/elevenlabs-js';
 import type { AppSettings, GenerationTask, ProviderName, Step1Response, ValidateProviderResult } from '@shared/types';
 import { getAsset, getProjectAssetsDir, getSettings } from './db';
 import { step1Schema } from './schemas';
@@ -15,6 +16,13 @@ type SharpLike = (input: string) => {
 
 let cachedSharp: SharpLike | null = null;
 let sharpLoadError: string | null = null;
+const falFluxModels = [
+  'fal-ai/flux/schnell',
+  'fal-ai/flux/dev',
+  'fal-ai/flux-pro/v1.1',
+  'fal-ai/flux-pro/kontext'
+] as const;
+const elevenLabsClients = new Map<string, ElevenLabsClient>();
 
 async function loadSharp(): Promise<SharpLike | null> {
   if (cachedSharp) {
@@ -40,7 +48,7 @@ async function loadSharp(): Promise<SharpLike | null> {
 }
 
 function getKey(provider: ProviderName, settings: AppSettings): string {
-  const key = settings.providerKeys[provider];
+  const key = settings.providers.find((item) => item.name === provider)?.apiKey?.trim();
   if (!key) {
     throw new Error(`Missing API key for provider: ${provider}`);
   }
@@ -50,6 +58,33 @@ function getKey(provider: ProviderName, settings: AppSettings): string {
 
 function resolveTask(task: GenerationTask, settings: AppSettings): { provider: ProviderName; model: string } {
   return settings.taskModelMappings[task];
+}
+
+function getCompatibleVideoModelsForProvider(provider: ProviderName, models: string[]): string[] {
+  if (provider === 'openai') {
+    return models.filter((model) => /(veo|video|sora)/i.test(model.trim()));
+  }
+  if (provider === 'gemini') {
+    return models.filter((model) => /(veo|video)/i.test(model.trim()));
+  }
+  return [];
+}
+
+async function resolveVideoModel(
+  provider: ProviderName,
+  requestedModel: string,
+  apiKey: string
+): Promise<string> {
+  const desired = requestedModel.trim();
+  const available = await listProviderModels(provider, apiKey);
+  const compatible = getCompatibleVideoModelsForProvider(provider, available);
+  if (desired && compatible.includes(desired)) {
+    return desired;
+  }
+  if (compatible.length > 0) {
+    return compatible[0];
+  }
+  return desired;
 }
 
 async function ensureOk(res: Response, label: string): Promise<void> {
@@ -99,6 +134,10 @@ async function callGeminiText(model: string, prompt: string, apiKey: string): Pr
   };
 
   return data.candidates?.[0]?.content?.parts?.map((part) => part.text ?? '').join('\n') ?? '';
+}
+
+function falAuthHeader(apiKey: string): string {
+  return `Key ${apiKey}`;
 }
 
 function pickImageExtension(contentType: string | null, fallback = 'png'): string {
@@ -296,6 +335,68 @@ async function geminiGenerateImage(
   return { filePath, metadata: { mimeType: inlineMimeType } };
 }
 
+async function falGenerateImage(
+  model: string,
+  prompt: string,
+  apiKey: string,
+  outputPathWithoutExt: string,
+  referenceImagePaths: string[] = []
+): Promise<{ filePath: string; metadata: Record<string, unknown> }> {
+  const references = referenceImagePaths
+    .map((imagePath) => {
+      const bytes = readFileSync(imagePath);
+      const mimeType = mimeTypeFromImagePath(imagePath);
+      return `data:${mimeType};base64,${bytes.toString('base64')}`;
+    })
+    .filter((value) => Boolean(value));
+  const body: Record<string, unknown> = {
+    prompt
+  };
+  if (references.length > 0) {
+    // fal models differ in input schema; provide common reference keys.
+    body['image_url'] = references[0];
+    body['control_image_url'] = references[0];
+    body['reference_images'] = references;
+  }
+  const res = await fetch(`https://fal.run/${model}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: falAuthHeader(apiKey)
+    },
+    body: JSON.stringify(body)
+  });
+  await ensureOk(res, 'fal.ai image generation');
+
+  const data = (await res.json()) as {
+    images?: Array<{ url?: string; b64_json?: string }>;
+    image?: { url?: string; b64_json?: string };
+    seed?: number;
+  };
+
+  const first = data.images?.[0] ?? data.image;
+  if (!first) {
+    throw new Error('fal.ai image generation returned no image data');
+  }
+
+  if (first.b64_json) {
+    const bytes = Buffer.from(first.b64_json, 'base64');
+    const filePath = `${outputPathWithoutExt}.png`;
+    writeFileSync(filePath, bytes);
+    return {
+      filePath,
+      metadata: { output: 'b64_json', seed: data.seed, referenceCount: references.length }
+    };
+  }
+
+  if (first.url) {
+    const filePath = await downloadToFile(first.url, outputPathWithoutExt);
+    return { filePath, metadata: { output: 'url', seed: data.seed, referenceCount: references.length } };
+  }
+
+  throw new Error('fal.ai image generation response missing b64_json/url');
+}
+
 async function openAiGenerateVideoFromImage(
   model: string,
   prompt: string,
@@ -429,6 +530,9 @@ async function geminiGenerateVideoFromImage(
 export async function generateStep1(prompt: string): Promise<Step1Response> {
   const settings = getSettings();
   const { provider, model } = resolveTask('generateScript', settings);
+  if (provider !== 'openai' && provider !== 'gemini') {
+    throw new Error(`${provider} is currently not supported for script generation.`);
+  }
   const key = getKey(provider, settings);
 
   const raw = provider === 'openai' ? await callOpenAiChat(model, prompt, key) : await callGeminiText(model, prompt, key);
@@ -439,7 +543,7 @@ export async function generateStep1(prompt: string): Promise<Step1Response> {
 
 export async function validateProvider(provider: ProviderName, apiKey?: string): Promise<ValidateProviderResult> {
   const settings = getSettings();
-  const key = apiKey?.trim() || settings.providerKeys[provider];
+  const key = apiKey?.trim() || settings.providers.find((item) => item.name === provider)?.apiKey?.trim();
   if (!key) {
     return { ok: false, message: `Missing API key for ${provider}` };
   }
@@ -450,11 +554,37 @@ export async function validateProvider(provider: ProviderName, apiKey?: string):
         headers: { Authorization: `Bearer ${key}` }
       });
       await ensureOk(res, 'OpenAI key validation');
-    } else {
+    } else if (provider === 'gemini') {
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`
       );
       await ensureOk(res, 'Gemini key validation');
+    } else if (provider === 'fal') {
+      const falValidationEndpoints = ['https://api.fal.ai/v1/models?limit=1', 'https://api.fal.ai/v1/models'];
+      let validated = false;
+      let lastError: string | null = null;
+      for (const endpoint of falValidationEndpoints) {
+        const res = await fetch(endpoint, {
+          headers: { Authorization: falAuthHeader(key) }
+        });
+        if (res.ok) {
+          validated = true;
+          break;
+        }
+        const body = await res.text();
+        const isHtml = /<!doctype html>/i.test(body);
+        lastError = `fal.ai key validation failed: ${res.status} ${isHtml ? 'Unexpected HTML response from endpoint.' : body}`;
+      }
+      if (!validated) {
+        throw new Error(lastError ?? 'fal.ai key validation failed.');
+      }
+    } else if (provider === 'elevenlabs') {
+      const res = await fetch('https://api.elevenlabs.io/v1/models', {
+        headers: { 'xi-api-key': key }
+      });
+      await ensureOk(res, 'ElevenLabs key validation');
+    } else {
+      return { ok: true, message: `${provider} key is saved (live validation is not implemented yet)` };
     }
 
     return { ok: true, message: `${provider} key is valid` };
@@ -477,18 +607,47 @@ export async function listProviderModels(provider: ProviderName, apiKey?: string
     return [...new Set((data.data ?? []).map((item) => item.id).filter((id): id is string => Boolean(id)))].sort();
   }
 
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`);
-  await ensureOk(res, 'Gemini list models');
-  const data = (await res.json()) as { models?: Array<{ name?: string }> };
+  if (provider === 'gemini') {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`);
+    await ensureOk(res, 'Gemini list models');
+    const data = (await res.json()) as { models?: Array<{ name?: string }> };
 
-  return [
-    ...new Set(
-      (data.models ?? [])
-        .map((item) => item.name ?? '')
-        .map((name) => name.replace(/^models\//, ''))
-        .filter((name) => Boolean(name))
-    )
-  ].sort();
+    return [
+      ...new Set(
+        (data.models ?? [])
+          .map((item) => item.name ?? '')
+          .map((name) => name.replace(/^models\//, ''))
+          .filter((name) => Boolean(name))
+      )
+    ].sort();
+  }
+
+  if (provider === 'fal') {
+    // fal.ai does not provide a public generic model listing endpoint; return curated Flux choices.
+    return [...falFluxModels];
+  }
+
+  if (provider === 'elevenlabs') {
+    const res = await fetch('https://api.elevenlabs.io/v1/models', {
+      headers: { 'xi-api-key': key }
+    });
+    await ensureOk(res, 'ElevenLabs list models');
+    const payload = (await res.json()) as
+      | Array<{ model_id?: string; modelId?: string; can_do_text_to_speech?: boolean }>
+      | { models?: Array<{ model_id?: string; modelId?: string; can_do_text_to_speech?: boolean }> };
+    const models = Array.isArray(payload) ? payload : (payload.models ?? []);
+
+    return [
+      ...new Set(
+        models
+          .filter((model) => model.can_do_text_to_speech !== false)
+          .map((model) => model.model_id ?? model.modelId ?? '')
+          .filter((modelId): modelId is string => Boolean(modelId))
+      )
+    ].sort();
+  }
+
+  return [];
 }
 
 export async function generateImage(options: {
@@ -507,13 +666,25 @@ export async function generateImage(options: {
   const generated =
     mapping.provider === 'openai'
       ? await openAiGenerateImage(mapping.model, options.prompt, key, outputPathWithoutExt)
-      : await geminiGenerateImage(
+      : mapping.provider === 'fal'
+        ? await falGenerateImage(
           mapping.model,
           options.prompt,
           key,
           outputPathWithoutExt,
           options.references ?? []
-        );
+        )
+      : mapping.provider === 'gemini'
+        ? await geminiGenerateImage(
+          mapping.model,
+          options.prompt,
+          key,
+          outputPathWithoutExt,
+          options.references ?? []
+        )
+        : (() => {
+            throw new Error(`${mapping.provider} is currently not supported for image generation.`);
+          })();
   const compressed = await archiveAndCompressGeneratedImage(generated.filePath, outputDir);
 
   return {
@@ -545,18 +716,274 @@ export async function generateVideoFromImage(options: {
   const key = getKey(mapping.provider, settings);
   const outputPathWithoutExt = join(outputDir, `scene-${options.sceneId}-video-${randomUUID()}`);
 
+  if (mapping.provider !== 'openai' && mapping.provider !== 'gemini') {
+    throw new Error(`${mapping.provider} is currently not supported for video generation.`);
+  }
+  const resolvedModel = await resolveVideoModel(mapping.provider, mapping.model, key);
+  if (!resolvedModel) {
+    throw new Error(
+      `${mapping.provider} has no compatible video model available. Validate the provider key and reload models in Settings.`
+    );
+  }
+
   const generated =
     mapping.provider === 'openai'
-      ? await openAiGenerateVideoFromImage(mapping.model, options.prompt, copiedFrame, key, outputPathWithoutExt)
-      : await geminiGenerateVideoFromImage(mapping.model, options.prompt, copiedFrame, key, outputPathWithoutExt);
+      ? await openAiGenerateVideoFromImage(resolvedModel, options.prompt, copiedFrame, key, outputPathWithoutExt)
+      : mapping.provider === 'gemini'
+        ? await geminiGenerateVideoFromImage(resolvedModel, options.prompt, copiedFrame, key, outputPathWithoutExt)
+        : (() => {
+            throw new Error(`${mapping.provider} is currently not supported for video generation.`);
+          })();
+
+  return {
+    provider: mapping.provider,
+    model: resolvedModel,
+    filePath: generated.filePath,
+    metadataJson: JSON.stringify({
+      prompt: options.prompt,
+      firstFrameAssetId: options.firstFrameAssetId,
+      providerMetadata: generated.metadata
+    })
+  };
+}
+
+async function elevenLabsGenerateSpeech(
+  model: string,
+  text: string,
+  apiKey: string,
+  outputPathWithoutExt: string,
+  voiceId: string
+): Promise<{ filePath: string; metadata: Record<string, unknown> }> {
+  const bytes = await synthesizeElevenLabsAudioBuffer({
+    model,
+    text,
+    apiKey,
+    voiceId
+  });
+  const filePath = `${outputPathWithoutExt}.mp3`;
+  writeFileSync(filePath, bytes);
+  return { filePath, metadata: { voiceId } };
+}
+
+function looksLikeElevenLabsModelId(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return normalized.startsWith('eleven-') || normalized.startsWith('eleven_');
+}
+
+function normalizeElevenLabsVoiceId(candidate: string | undefined, fallback: string): string {
+  const raw = candidate?.trim() ?? '';
+  if (!raw || looksLikeElevenLabsModelId(raw)) {
+    return fallback;
+  }
+  return raw;
+}
+
+function getElevenLabsClient(apiKey: string): ElevenLabsClient {
+  const existing = elevenLabsClients.get(apiKey);
+  if (existing) {
+    return existing;
+  }
+  const created = new ElevenLabsClient({ apiKey });
+  elevenLabsClients.set(apiKey, created);
+  return created;
+}
+
+async function toBuffer(audio: unknown): Promise<Buffer> {
+  if (Buffer.isBuffer(audio)) {
+    return audio;
+  }
+  if (audio instanceof Uint8Array) {
+    return Buffer.from(audio);
+  }
+  if (audio instanceof ArrayBuffer) {
+    return Buffer.from(audio);
+  }
+  if (
+    audio &&
+    typeof audio === 'object' &&
+    'arrayBuffer' in audio &&
+    typeof (audio as { arrayBuffer: () => Promise<ArrayBuffer> }).arrayBuffer === 'function'
+  ) {
+    const arrayBuffer = await (audio as { arrayBuffer: () => Promise<ArrayBuffer> }).arrayBuffer();
+    return Buffer.from(arrayBuffer);
+  }
+  if (
+    audio &&
+    typeof audio === 'object' &&
+    Symbol.asyncIterator in audio &&
+    typeof (audio as AsyncIterable<unknown>)[Symbol.asyncIterator] === 'function'
+  ) {
+    const chunks: Buffer[] = [];
+    for await (const chunk of audio as AsyncIterable<unknown>) {
+      if (Buffer.isBuffer(chunk)) {
+        chunks.push(chunk);
+      } else if (chunk instanceof Uint8Array) {
+        chunks.push(Buffer.from(chunk));
+      } else if (chunk instanceof ArrayBuffer) {
+        chunks.push(Buffer.from(chunk));
+      }
+    }
+    if (chunks.length > 0) {
+      return Buffer.concat(chunks);
+    }
+  }
+  throw new Error('ElevenLabs returned an unsupported audio payload type.');
+}
+
+function isInvalidVoiceError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.toLowerCase();
+  return normalized.includes('invalid_uid') || normalized.includes('invalid id has been received');
+}
+
+async function listElevenLabsVoiceIds(apiKey: string): Promise<string[]> {
+  const client = getElevenLabsClient(apiKey) as unknown as {
+    voices?: { search?: () => Promise<{ voices?: Array<{ voiceId?: string; voice_id?: string }> }> };
+  };
+  const res = await client.voices?.search?.();
+  const voices = res?.voices ?? [];
+  return voices
+    .map((voice) => voice.voiceId ?? voice.voice_id ?? '')
+    .filter((voiceId): voiceId is string => Boolean(voiceId));
+}
+
+async function synthesizeElevenLabsAudioBuffer(options: {
+  model: string;
+  text: string;
+  apiKey: string;
+  voiceId: string;
+}): Promise<Buffer> {
+  const client = getElevenLabsClient(options.apiKey);
+  const audio = await client.textToSpeech.convert(options.voiceId, {
+    text: options.text,
+    modelId: options.model
+  });
+  return toBuffer(audio);
+}
+
+export async function synthesizeElevenLabsSpeechPreview(options: {
+  model: string;
+  text: string;
+  apiKey: string;
+  voiceId: string;
+}): Promise<string> {
+  const defaultVoiceId = 'EXAVITQu4vr4xnSDxMaL';
+  const primaryVoiceId = normalizeElevenLabsVoiceId(options.voiceId, defaultVoiceId);
+  let resolvedVoiceId = primaryVoiceId;
+  try {
+    const availableVoiceIds = await listElevenLabsVoiceIds(options.apiKey);
+    if (availableVoiceIds.length > 0 && !availableVoiceIds.includes(primaryVoiceId)) {
+      resolvedVoiceId = availableVoiceIds.includes(defaultVoiceId) ? defaultVoiceId : availableVoiceIds[0];
+    }
+  } catch {
+    // If voice listing fails, continue with fallback logic below.
+  }
+  let bytes: Buffer;
+  try {
+    bytes = await synthesizeElevenLabsAudioBuffer({
+      model: options.model,
+      text: options.text,
+      apiKey: options.apiKey,
+      voiceId: resolvedVoiceId
+    });
+  } catch (error) {
+    if (isInvalidVoiceError(error)) {
+      try {
+        bytes = await synthesizeElevenLabsAudioBuffer({
+          model: options.model,
+          text: options.text,
+          apiKey: options.apiKey,
+          voiceId: defaultVoiceId
+        });
+      } catch (defaultError) {
+        if (!isInvalidVoiceError(defaultError)) {
+          throw new Error(
+            `ElevenLabs voice preview failed: ${defaultError instanceof Error ? defaultError.message : String(defaultError)}`,
+            { cause: defaultError }
+          );
+        }
+        const availableVoiceIds = await listElevenLabsVoiceIds(options.apiKey);
+        const fallbackVoiceId = availableVoiceIds[0];
+        if (!fallbackVoiceId) {
+          throw new Error(
+            `ElevenLabs voice preview failed: ${defaultError instanceof Error ? defaultError.message : String(defaultError)}`,
+            { cause: defaultError }
+          );
+        }
+        bytes = await synthesizeElevenLabsAudioBuffer({
+          model: options.model,
+          text: options.text,
+          apiKey: options.apiKey,
+          voiceId: fallbackVoiceId
+        });
+      }
+    } else {
+      throw new Error(`ElevenLabs voice preview failed: ${error instanceof Error ? error.message : String(error)}`, {
+        cause: error
+      });
+    }
+  }
+
+  return `data:audio/mpeg;base64,${bytes.toString('base64')}`;
+}
+
+export async function generateSpeech(options: {
+  projectId: string;
+  text: string;
+  segments?: Array<{ text: string; voiceId?: string }>;
+}): Promise<{ provider: ProviderName; model: string; filePath: string; metadataJson: string }> {
+  const settings = getSettings();
+  const mapping = resolveTask('textToSpeech', settings);
+  if (mapping.provider !== 'elevenlabs') {
+    throw new Error(`${mapping.provider} is currently not supported for speech generation.`);
+  }
+  const outputDir = getProjectAssetsDir(options.projectId);
+  const outputPathWithoutExt = join(outputDir, `speech-${randomUUID()}`);
+  const key = getKey(mapping.provider, settings);
+  const defaultVoiceId = normalizeElevenLabsVoiceId(
+    settings.elevenLabsVoiceId,
+    'EXAVITQu4vr4xnSDxMaL'
+  );
+  let generated: { filePath: string; metadata: Record<string, unknown> };
+  if (options.segments && options.segments.length > 0) {
+    const chunks: Buffer[] = [];
+    const usedVoiceIds: string[] = [];
+    for (const segment of options.segments) {
+      const segmentText = segment.text?.trim();
+      if (!segmentText) continue;
+      const voiceId = normalizeElevenLabsVoiceId(segment.voiceId, defaultVoiceId);
+      const preview = await synthesizeElevenLabsSpeechPreview({
+        model: mapping.model,
+        text: segmentText,
+        apiKey: key,
+        voiceId
+      });
+      const base64 = preview.replace(/^data:audio\/mpeg;base64,/, '');
+      chunks.push(Buffer.from(base64, 'base64'));
+      usedVoiceIds.push(voiceId);
+    }
+    if (chunks.length === 0) {
+      throw new Error('No transcript content to synthesize.');
+    }
+    const filePath = `${outputPathWithoutExt}.mp3`;
+    writeFileSync(filePath, Buffer.concat(chunks));
+    generated = {
+      filePath,
+      metadata: {
+        voiceIds: [...new Set(usedVoiceIds)],
+        segmentCount: chunks.length
+      }
+    };
+  } else {
+    generated = await elevenLabsGenerateSpeech(mapping.model, options.text, key, outputPathWithoutExt, defaultVoiceId);
+  }
 
   return {
     provider: mapping.provider,
     model: mapping.model,
     filePath: generated.filePath,
     metadataJson: JSON.stringify({
-      prompt: options.prompt,
-      firstFrameAssetId: options.firstFrameAssetId,
+      textLength: options.text.length,
       providerMetadata: generated.metadata
     })
   };

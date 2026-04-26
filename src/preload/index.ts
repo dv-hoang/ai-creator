@@ -7,6 +7,7 @@ const api: ElectronApi = {
     save: (settings) => ipcRenderer.invoke('settings:save', settings),
     validateProvider: (provider, apiKey) => ipcRenderer.invoke('settings:validateProvider', provider, apiKey),
     listModels: (provider, apiKey) => ipcRenderer.invoke('settings:listModels', provider, apiKey),
+    testVoice: (settings, sampleText) => ipcRenderer.invoke('settings:testVoice', settings, sampleText),
     checkForUpdates: () => ipcRenderer.invoke('settings:checkForUpdates')
   },
   projects: {
@@ -31,7 +32,13 @@ const api: ElectronApi = {
   },
   transcript: {
     untimedText: (projectId) => ipcRenderer.invoke('transcript:untimedText', projectId),
-    exportSrt: (projectId) => ipcRenderer.invoke('transcript:exportSrt', projectId)
+    exportSrt: (projectId) => ipcRenderer.invoke('transcript:exportSrt', projectId),
+    generateSpeech: (projectId) => ipcRenderer.invoke('transcript:generateSpeech', projectId),
+    generateSpeechAllInOne: (projectId) => ipcRenderer.invoke('transcript:generateSpeechAllInOne', projectId),
+    generateSpeechForScene: (sceneId) => ipcRenderer.invoke('transcript:generateSpeechForScene', sceneId),
+    updateRow: (transcriptId, patch) => ipcRenderer.invoke('transcript:updateRow', transcriptId, patch),
+    updateSpeakerVoice: (projectId, speaker, voiceId) =>
+      ipcRenderer.invoke('transcript:updateSpeakerVoice', projectId, speaker, voiceId)
   },
   app: {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),

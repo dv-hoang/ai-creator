@@ -180,6 +180,12 @@ select {
   gap: 14px;
 }
 
+.settings-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .settings-panel label {
   display: grid;
   gap: 6px;
@@ -737,6 +743,51 @@ select {
   margin: 0;
 }
 
+.speech-dropdown {
+  position: relative;
+}
+
+.speech-dropdown-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  list-style: none;
+}
+
+.speech-dropdown-trigger::-webkit-details-marker {
+  display: none;
+}
+
+.speech-dropdown-chevron {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.speech-dropdown[open] .speech-dropdown-chevron {
+  transform: rotate(180deg);
+}
+
+.speech-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  min-width: 200px;
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: rgba(2, 6, 23, 0.98);
+  box-shadow: 0 10px 30px rgba(2, 6, 23, 0.45);
+}
+
+.speech-dropdown-item {
+  width: 100%;
+  justify-content: flex-start;
+  text-align: left;
+}
+
 .info-view {
   padding: 14px;
   display: grid;
@@ -792,6 +843,21 @@ select {
   background: rgba(11, 17, 32, 0.8);
   border-radius: 8px;
   padding: 8px 10px;
+}
+
+.speaker-voice-row {
+  grid-template-columns: 160px 1fr auto;
+  align-items: center;
+}
+
+.transcript-edit-row {
+  grid-template-columns: 90px 140px 1fr auto;
+  align-items: start;
+}
+
+.transcript-row-save-btn {
+  justify-self: start;
+  padding: 6px 10px;
 }
 
 .status-message {

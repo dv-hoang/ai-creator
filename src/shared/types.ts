@@ -1,6 +1,11 @@
 export type AppLanguage = 'en' | 'vi';
-export type ProviderName = 'openai' | 'gemini';
-export type GenerationTask = 'generateScript' | 'generateImage' | 'generateVideo';
+export type ProviderName = 'openai' | 'gemini' | 'fal' | 'elevenlabs';
+export type GenerationTask = 'generateScript' | 'generateImage' | 'generateVideo' | 'textToSpeech';
+
+export interface ProviderConfig {
+  name: ProviderName;
+  apiKey: string;
+}
 
 export interface TaskModelMapping {
   provider: ProviderName;
@@ -9,7 +14,8 @@ export interface TaskModelMapping {
 
 export interface AppSettings {
   language: AppLanguage;
-  providerKeys: Partial<Record<ProviderName, string>>;
+  providers: ProviderConfig[];
+  elevenLabsVoiceId: string;
   providerModels: Partial<Record<ProviderName, string[]>>;
   taskModelMappings: Record<GenerationTask, TaskModelMapping>;
   generationEnabled: {
@@ -73,9 +79,10 @@ export interface TranscriptRow {
   text: string;
   startSec: number;
   endSec: number;
+  voiceId: string;
 }
 
-export type AssetKind = 'image' | 'video' | 'srt' | 'text';
+export type AssetKind = 'image' | 'video' | 'audio' | 'srt' | 'text';
 export type AssetEntityType = 'character' | 'scene' | 'video' | 'transcript';
 
 export interface AssetRecord {
@@ -146,6 +153,7 @@ export interface ElectronApi {
     save(settings: AppSettings): Promise<AppSettings>;
     validateProvider(provider: ProviderName, apiKey?: string): Promise<ValidateProviderResult>;
     listModels(provider: ProviderName, apiKey?: string): Promise<string[]>;
+    testVoice(settings: AppSettings, sampleText: string): Promise<string>;
     checkForUpdates(): Promise<UpdateCheckResult>;
   };
   projects: {
@@ -171,6 +179,24 @@ export interface ElectronApi {
   transcript: {
     untimedText(projectId: string): Promise<string>;
     exportSrt(projectId: string): Promise<string>;
+    generateSpeech(projectId: string): Promise<GenerationResult>;
+    generateSpeechAllInOne(projectId: string): Promise<GenerationResult>;
+    generateSpeechForScene(sceneId: string): Promise<GenerationResult>;
+    updateRow(
+      transcriptId: string,
+      patch: {
+        speaker?: string;
+        text?: string;
+        startSec?: number;
+        endSec?: number;
+        voiceId?: string;
+      },
+    ): Promise<TranscriptRow>;
+    updateSpeakerVoice(
+      projectId: string,
+      speaker: string,
+      voiceId: string,
+    ): Promise<number>;
   };
   app: {
     getVersion(): Promise<string>;

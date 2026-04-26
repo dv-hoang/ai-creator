@@ -5,3 +5,4 @@ dist
 *.log
 release/**/*
 .DS_Store
+.env

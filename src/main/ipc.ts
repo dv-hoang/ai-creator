@@ -1,8 +1,17 @@
 import { app, dialog, ipcMain, shell } from 'electron';
-import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { copyFileSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
+import { basename, dirname, extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { Character, ProjectInput, ProjectRecord, Scene, Step1Response } from '@shared/types';
+import type {
+  AppSettings,
+  Character,
+  GenerationTask,
+  ProjectInput,
+  ProjectRecord,
+  ProviderName,
+  Scene,
+  Step1Response
+} from '@shared/types';
 import {
   createProject,
   getAsset,
@@ -13,6 +22,7 @@ import {
   getProjectAssetsDir,
   getScenesByProject,
   getSettings,
+  getTranscriptsByProject,
   getWorkspace,
   initDb,
   linkCharacterAsset,
@@ -24,11 +34,21 @@ import {
   saveSettings,
   saveStep1Output,
   saveTranscripts,
+  updateTranscriptRow,
+  updateTranscriptVoiceBySpeaker,
   updateCharacterPrompt,
   updateProjectStatus,
   updateScenePrompts
 } from './db';
-import { generateImage, generateStep1, generateVideoFromImage, listProviderModels, validateProvider } from './providers';
+import {
+  generateImage,
+  generateSpeech,
+  generateStep1,
+  generateVideoFromImage,
+  listProviderModels,
+  synthesizeElevenLabsSpeechPreview,
+  validateProvider
+} from './providers';
 import { buildUntimedTranscript, exportSrt } from './transcript';
 import { renderAnimationPrompt } from './template';
 import { checkGithubReleaseUpdate } from './update';
@@ -112,7 +132,8 @@ function normalizeStep1(projectId: string, response: Step1Response) {
     speaker: item.speaker,
     text: item.text,
     startSec: item.start_sec,
-    endSec: item.end_sec
+    endSec: item.end_sec,
+    voiceId: ''
   }));
 
   return { characters, scenes, transcripts };
@@ -199,32 +220,140 @@ function findSceneById(sceneId: string): Scene | null {
   return null;
 }
 
+function toSpeakerSlug(speaker: string): string {
+  return (
+    speaker
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'speaker'
+  );
+}
+
+function withSceneSpeechFileName(filePath: string, sceneIndex: number, speaker: string): string {
+  const extension = extname(filePath) || '.mp3';
+  const nextName = `scene-${String(sceneIndex).padStart(3, '0')}-${toSpeakerSlug(speaker)}-${Date.now()}-${randomUUID().slice(0, 8)}${extension}`;
+  return join(dirname(filePath), nextName);
+}
+
+const taskSupportedProviders: Record<GenerationTask, ProviderName[]> = {
+  generateScript: ['openai', 'gemini'],
+  generateImage: ['openai', 'gemini', 'fal'],
+  generateVideo: ['openai', 'gemini'],
+  textToSpeech: ['elevenlabs']
+};
+
+function getCompatibleModelsForTask(task: GenerationTask, provider: ProviderName, models: string[]): string[] {
+  if (provider === 'fal' || provider === 'elevenlabs') {
+    return models;
+  }
+
+  if (provider === 'openai') {
+    if (task === 'generateScript') {
+      return models.filter((model) => /^(gpt|o\d|chatgpt|text-)/i.test(model.trim()));
+    }
+    if (task === 'generateImage') {
+      return models.filter((model) => /(image|dall|gpt-image)/i.test(model.trim()));
+    }
+    if (task === 'generateVideo') {
+      return models.filter((model) => /(veo|video|sora)/i.test(model.trim()));
+    }
+    return [];
+  }
+
+  if (provider === 'gemini') {
+    if (task === 'generateScript') {
+      return models.filter((model) => /gemini/i.test(model.trim()));
+    }
+    if (task === 'generateImage') {
+      return models.filter((model) => /(image|gemini)/i.test(model.trim()));
+    }
+    if (task === 'generateVideo') {
+      return models.filter((model) => /(veo|video)/i.test(model.trim()));
+    }
+    return [];
+  }
+
+  return models;
+}
+
+function normalizeTaskMappingsForSave(settings: AppSettings): AppSettings['taskModelMappings'] {
+  const configuredProviders = settings.providers
+    .filter((provider) => provider.apiKey.trim())
+    .map((provider) => provider.name);
+  const nextMappings = { ...settings.taskModelMappings };
+
+  (Object.keys(taskSupportedProviders) as GenerationTask[]).forEach((task) => {
+    const supported = taskSupportedProviders[task];
+    const candidates = configuredProviders.filter((provider) => supported.includes(provider));
+    const currentProvider = nextMappings[task].provider;
+    const provider = candidates.includes(currentProvider) ? currentProvider : (candidates[0] ?? currentProvider);
+    const compatibleModels = getCompatibleModelsForTask(task, provider, settings.providerModels[provider] ?? []);
+    const model = compatibleModels.includes(nextMappings[task].model)
+      ? nextMappings[task].model
+      : (compatibleModels[0] ?? '');
+
+    nextMappings[task] = { provider, model };
+  });
+
+  return nextMappings;
+}
+
 export function registerIpc(): void {
   initDb();
 
   bind('settings:get', () => getSettings());
-  bind('settings:save', async (settings) => {
+  bind('settings:save', async (settings: AppSettings) => {
     const nextSettings = { ...settings, providerModels: { ...settings.providerModels } };
-    const providers = ['openai', 'gemini'] as const;
+    const providersByName = new Map(settings.providers.map((provider) => [provider.name, provider]));
 
-    for (const provider of providers) {
-      const key = nextSettings.providerKeys[provider]?.trim();
+    for (const [providerName, provider] of providersByName) {
+      const key = provider.apiKey?.trim();
       if (!key) {
-        nextSettings.providerModels[provider] = [];
+        nextSettings.providerModels[providerName] = [];
         continue;
       }
 
       try {
-        nextSettings.providerModels[provider] = await listProviderModels(provider, key);
+        nextSettings.providerModels[providerName] = await listProviderModels(providerName, key);
       } catch {
-        nextSettings.providerModels[provider] = [];
+        nextSettings.providerModels[providerName] = [];
       }
     }
 
+    nextSettings.taskModelMappings = normalizeTaskMappingsForSave(nextSettings);
     return saveSettings(nextSettings);
   });
   bind('settings:validateProvider', (provider, apiKey?: string) => validateProvider(provider, apiKey));
   bind('settings:listModels', (provider, apiKey?: string) => listProviderModels(provider, apiKey));
+  bind('settings:testVoice', async (settings: AppSettings, sampleText: string) => {
+    const mapping = settings.taskModelMappings.textToSpeech;
+    if (mapping.provider !== 'elevenlabs') {
+      throw new Error('Text-to-speech mapping must use ElevenLabs to test voice.');
+    }
+    const providerRecord = settings.providers.find((provider) => provider.name === 'elevenlabs');
+    const apiKey = providerRecord?.apiKey?.trim();
+    if (!apiKey) {
+      throw new Error('Missing ElevenLabs API key.');
+    }
+    const configuredVoiceId = settings.elevenLabsVoiceId?.trim() ?? '';
+    const voiceId =
+      !configuredVoiceId ||
+      configuredVoiceId === mapping.model ||
+      /^eleven[-_]/i.test(configuredVoiceId)
+        ? 'EXAVITQu4vr4xnSDxMaL'
+        : configuredVoiceId;
+    if (!voiceId) {
+      throw new Error('Missing ElevenLabs voice ID.');
+    }
+    const text = sampleText?.trim() || 'This is a quick voice preview from AI Creator.';
+    const audioDataUrl = await synthesizeElevenLabsSpeechPreview({
+      model: mapping.model,
+      text,
+      apiKey,
+      voiceId
+    });
+    return audioDataUrl;
+  });
   bind('settings:checkForUpdates', async () => {
     return checkGithubReleaseUpdate(DEFAULT_RELEASE_REPO);
   });
@@ -402,4 +531,166 @@ export function registerIpc(): void {
 
     return exportSrt(projectId, saveResult.filePath);
   });
+  bind('transcript:generateSpeech', async (projectId: string) => {
+    const rows = getTranscriptsByProject(projectId).filter((row) => row.text.trim());
+    if (rows.length === 0) {
+      throw new Error('Transcript is empty. Add transcript lines before generating speech.');
+    }
+    const grouped = new Map<string, { scene: number; speaker: string; lines: string[]; voiceId?: string }>();
+    rows.forEach((row) => {
+      const scene = row.scene;
+      const speaker = row.speaker.trim() || 'Unknown';
+      const key = `${scene}::${speaker}`;
+      const existing = grouped.get(key) ?? { scene, speaker, lines: [], voiceId: row.voiceId?.trim() };
+      existing.lines.push(row.text.trim());
+      if (!existing.voiceId && row.voiceId?.trim()) {
+        existing.voiceId = row.voiceId.trim();
+      }
+      grouped.set(key, existing);
+    });
+
+    const groups = [...grouped.values()];
+    if (groups.length === 0) {
+      throw new Error('Transcript is empty. Add transcript lines before generating speech.');
+    }
+
+    const generatedAssets = [];
+    for (const group of groups) {
+      const text = group.lines.join('\n').trim();
+      if (!text) continue;
+      const generated = await generateSpeech({
+        projectId,
+        text,
+        segments: [{ text, voiceId: group.voiceId }]
+      });
+      const renamedFilePath = withSceneSpeechFileName(generated.filePath, group.scene, group.speaker);
+      renameSync(generated.filePath, renamedFilePath);
+      const speakerSlug = toSpeakerSlug(group.speaker);
+      const providerMetadata =
+        generated.metadataJson && generated.metadataJson.trim()
+          ? JSON.parse(generated.metadataJson)
+          : {};
+      const asset = saveAsset({
+        projectId,
+        entityType: 'transcript',
+        entityId: `${projectId}:scene-${group.scene}:speaker-${speakerSlug}`,
+        kind: 'audio',
+        filePath: renamedFilePath,
+        provider: generated.provider,
+        model: generated.model,
+        metadataJson: JSON.stringify({
+          scene: group.scene,
+          speaker: group.speaker,
+          providerMetadata
+        })
+      });
+      generatedAssets.push(asset);
+    }
+
+    if (generatedAssets.length === 0) {
+      throw new Error('Transcript is empty. Add transcript lines before generating speech.');
+    }
+    return { jobId: randomUUID(), asset: generatedAssets[generatedAssets.length - 1] };
+  });
+  bind('transcript:generateSpeechAllInOne', async (projectId: string) => {
+    const rows = getTranscriptsByProject(projectId).filter((row) => row.text.trim());
+    if (rows.length === 0) {
+      throw new Error('Transcript is empty. Add transcript lines before generating speech.');
+    }
+    const text = rows.map((row) => row.text.trim()).join('\n').trim();
+    if (!text) {
+      throw new Error('Transcript is empty. Add transcript lines before generating speech.');
+    }
+    const generated = await generateSpeech({
+      projectId,
+      text
+    });
+    const asset = saveAsset({
+      projectId,
+      entityType: 'transcript',
+      entityId: projectId,
+      kind: 'audio',
+      filePath: generated.filePath,
+      provider: generated.provider,
+      model: generated.model,
+      metadataJson: JSON.stringify({
+        mode: 'all-in-one',
+        providerMetadata:
+          generated.metadataJson && generated.metadataJson.trim()
+            ? JSON.parse(generated.metadataJson)
+            : {}
+      })
+    });
+    return { jobId: randomUUID(), asset };
+  });
+  bind('transcript:generateSpeechForScene', async (sceneId: string) => {
+    const scene = findSceneById(sceneId);
+    if (!scene) {
+      throw new Error('Scene not found.');
+    }
+    const rows = getTranscriptsByProject(scene.projectId).filter(
+      (row) => row.scene === scene.sceneIndex && row.text.trim()
+    );
+    if (rows.length === 0) {
+      throw new Error('Scene transcript is empty. Add transcript lines before generating speech.');
+    }
+
+    const grouped = new Map<string, { speaker: string; lines: string[]; voiceId?: string }>();
+    rows.forEach((row) => {
+      const speaker = row.speaker.trim() || 'Unknown';
+      const existing = grouped.get(speaker) ?? { speaker, lines: [], voiceId: row.voiceId?.trim() };
+      existing.lines.push(row.text.trim());
+      if (!existing.voiceId && row.voiceId?.trim()) {
+        existing.voiceId = row.voiceId.trim();
+      }
+      grouped.set(speaker, existing);
+    });
+
+    const generatedAssets = [];
+    for (const group of grouped.values()) {
+      const text = group.lines.join('\n').trim();
+      if (!text) continue;
+      const generated = await generateSpeech({
+        projectId: scene.projectId,
+        text,
+        segments: [{ text, voiceId: group.voiceId }]
+      });
+      const renamedFilePath = withSceneSpeechFileName(generated.filePath, scene.sceneIndex, group.speaker);
+      renameSync(generated.filePath, renamedFilePath);
+      const providerMetadata =
+        generated.metadataJson && generated.metadataJson.trim()
+          ? JSON.parse(generated.metadataJson)
+          : {};
+      const asset = saveAsset({
+        projectId: scene.projectId,
+        entityType: 'scene',
+        entityId: scene.id,
+        kind: 'audio',
+        filePath: renamedFilePath,
+        provider: generated.provider,
+        model: generated.model,
+        metadataJson: JSON.stringify({
+          scene: scene.sceneIndex,
+          speaker: group.speaker,
+          providerMetadata
+        })
+      });
+      generatedAssets.push(asset);
+    }
+
+    if (generatedAssets.length === 0) {
+      throw new Error('Scene transcript is empty. Add transcript lines before generating speech.');
+    }
+    return { jobId: randomUUID(), asset: generatedAssets[generatedAssets.length - 1] };
+  });
+  bind(
+    'transcript:updateRow',
+    (
+      transcriptId: string,
+      patch: { speaker?: string; text?: string; startSec?: number; endSec?: number; voiceId?: string }
+    ) => updateTranscriptRow(transcriptId, patch)
+  );
+  bind('transcript:updateSpeakerVoice', (projectId: string, speaker: string, voiceId: string) =>
+    updateTranscriptVoiceBySpeaker(projectId, speaker, voiceId)
+  );
 }
