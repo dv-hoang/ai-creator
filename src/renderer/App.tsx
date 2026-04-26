@@ -51,14 +51,20 @@ const emptyProjectInput: ProjectInput = {
 };
 
 function toRenderableSrc(filePath: string): string {
-  if (/^(https?:|file:|data:)/i.test(filePath)) {
+  if (/^(https?:|data:)/i.test(filePath)) {
     return filePath;
   }
+
+  if (/^file:/i.test(filePath)) {
+    const diskPath = decodeURIComponent(filePath.replace(/^file:\/\//i, ""));
+    return `local-asset://open?path=${encodeURIComponent(diskPath)}`;
+  }
+
   const normalized = filePath.replaceAll("\\", "/");
   const absolutePath = normalized.startsWith("/")
     ? normalized
     : `/${normalized}`;
-  return `file://${encodeURI(absolutePath)}`;
+  return `local-asset://open?path=${encodeURIComponent(absolutePath)}`;
 }
 
 export function App() {
@@ -745,7 +751,10 @@ export function App() {
                         "Bật nút tạo ảnh (Nhân vật & Cảnh)",
                       )}
                     </span>
-                    <label className="switch" aria-label={t("Toggle generate image", "Bật/tắt tạo ảnh")}>
+                    <label
+                      className="switch"
+                      aria-label={t("Toggle generate image", "Bật/tắt tạo ảnh")}
+                    >
                       <input
                         type="checkbox"
                         checked={settings.generationEnabled.generateImage}
@@ -770,7 +779,13 @@ export function App() {
                         "Bật nút tạo video (Cảnh)",
                       )}
                     </span>
-                    <label className="switch" aria-label={t("Toggle generate video", "Bật/tắt tạo video")}>
+                    <label
+                      className="switch"
+                      aria-label={t(
+                        "Toggle generate video",
+                        "Bật/tắt tạo video",
+                      )}
+                    >
                       <input
                         type="checkbox"
                         checked={settings.generationEnabled.generateVideo}
@@ -983,56 +998,67 @@ export function App() {
                   ))}
                 </select>
               </label>
-              <label>
-                {t("Size / Aspect Ratio", "Kích thước / Tỷ lệ")}
-                <select
-                  value={projectForm.aspectRatio}
-                  onChange={(event) =>
-                    setProjectForm({
-                      ...projectForm,
-                      aspectRatio: event.target.value,
-                    })
-                  }
-                >
-                  {aspectRatioPresets.map((preset) => (
-                    <option key={preset.value} value={preset.value}>
-                      {preset.value}
-                    </option>
-                  ))}
-                </select>
-                <div className="aspect-ratio-preview-grid" aria-hidden="true">
-                  {aspectRatioPresets.map((preset) => (
-                    <button
-                      key={preset.value}
-                      type="button"
-                      className={`aspect-ratio-preview${
-                        projectForm.aspectRatio === preset.value
-                          ? " active"
-                          : ""
-                      }`}
-                      onClick={() =>
-                        setProjectForm({
-                          ...projectForm,
-                          aspectRatio: preset.value,
-                        })
-                      }
-                    >
-                      <span className="aspect-ratio-preview-label">
-                        {preset.value}
-                      </span>
-                      <span className="aspect-ratio-preview-box-wrap">
-                        <span
-                          className="aspect-ratio-preview-box"
-                          style={{
-                            aspectRatio: `${preset.width} / ${preset.height}`,
-                          }}
-                        />
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </label>
             </div>
+            <label>
+              {t("Size / Aspect Ratio", "Kích thước / Tỷ lệ")}
+              <select
+                value={projectForm.aspectRatio}
+                onChange={(event) =>
+                  setProjectForm({
+                    ...projectForm,
+                    aspectRatio: event.target.value,
+                  })
+                }
+              >
+                {aspectRatioPresets.map((preset) => (
+                  <option key={preset.value} value={preset.value}>
+                    {preset.value}
+                  </option>
+                ))}
+              </select>
+              <div className="aspect-ratio-preview-grid" aria-hidden="true">
+                {aspectRatioPresets.map((preset) => (
+                    (() => {
+                      const previewMaxWidth = 56;
+                      const previewMaxHeight = 40;
+                      const scale = Math.min(
+                        previewMaxWidth / preset.width,
+                        previewMaxHeight / preset.height,
+                      );
+                      const previewWidth = Math.round(preset.width * scale);
+                      const previewHeight = Math.round(preset.height * scale);
+                      return (
+                  <button
+                    key={preset.value}
+                    type="button"
+                    className={`aspect-ratio-preview${
+                      projectForm.aspectRatio === preset.value ? " active" : ""
+                    }`}
+                    onClick={() =>
+                      setProjectForm({
+                        ...projectForm,
+                        aspectRatio: preset.value,
+                      })
+                    }
+                  >
+                    <span className="aspect-ratio-preview-label">
+                      {preset.value}
+                    </span>
+                    <span className="aspect-ratio-preview-box-wrap">
+                      <span
+                        className="aspect-ratio-preview-box"
+                        style={{
+                            width: `${previewWidth}px`,
+                            height: `${previewHeight}px`,
+                        }}
+                      />
+                    </span>
+                  </button>
+                      );
+                    })()
+                ))}
+              </div>
+            </label>
             <label>
               {t("Visual Style", "Phong cách hình ảnh")}
               <select

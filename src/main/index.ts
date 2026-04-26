@@ -1,7 +1,7 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, net, protocol } from 'electron';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { registerIpc } from './ipc';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -43,6 +43,15 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  protocol.handle('local-asset', (request) => {
+    const pathParam = request.url.split('?path=')[1] ?? '';
+    const assetPath = pathParam ? decodeURIComponent(pathParam) : '';
+    if (!assetPath) {
+      return new Response('Missing path', { status: 400 });
+    }
+    return net.fetch(pathToFileURL(assetPath).toString());
+  });
+
   const iconPath = resolveAppIconPath();
   if (iconPath && process.platform === 'darwin') {
     app.dock?.setIcon(iconPath);
