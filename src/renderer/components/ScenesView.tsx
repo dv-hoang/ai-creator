@@ -5,6 +5,8 @@ export function ScenesView(props: {
   scenes: Scene[];
   assetsByEntity: Map<string, AssetRecord[]>;
   generatingSceneIds: Set<string>;
+  generatingVideoSceneIds: Set<string>;
+  videoGenerationStatusBySceneId: Record<string, string>;
   selectedAssetIds: string[];
   onOpenLightbox: (src: string, alt: string) => void;
   onToggleAsset: (assetId: string) => void;
@@ -152,12 +154,22 @@ export function ScenesView(props: {
                       </button>
                     )}
                     {props.canGenerateVideo && (
-                      <button
-                        className="btn"
-                        onClick={() => void props.onGenerateVideo(scene)}
-                      >
-                        {t("Generate Video", "Tạo video")}
-                      </button>
+                      <>
+                        <button
+                          className="btn"
+                          onClick={() => void props.onGenerateVideo(scene)}
+                          disabled={props.generatingVideoSceneIds.has(scene.id)}
+                        >
+                          {props.generatingVideoSceneIds.has(scene.id)
+                            ? t("Generating video...", "Đang tạo video...")
+                            : t("Generate Video", "Tạo video")}
+                        </button>
+                        {props.videoGenerationStatusBySceneId[scene.id] && (
+                          <span className="muted">
+                            {props.videoGenerationStatusBySceneId[scene.id]}
+                          </span>
+                        )}
+                      </>
                     )}
                   </div>
                 )}

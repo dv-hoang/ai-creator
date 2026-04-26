@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { copyFileSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
 import { ElevenLabsClient } from '@elevenlabs/elevenlabs-js';
+import { GoogleGenAI } from '@google/genai';
 import type { AppSettings, GenerationTask, ProviderName, Step1Response, ValidateProviderResult } from '@shared/types';
 import { getAsset, getProjectAssetsDir, getSettings } from './db';
 import { step1Schema } from './schemas';
@@ -16,13 +17,8 @@ type SharpLike = (input: string) => {
 
 let cachedSharp: SharpLike | null = null;
 let sharpLoadError: string | null = null;
-const falFluxModels = [
-  'fal-ai/flux/schnell',
-  'fal-ai/flux/dev',
-  'fal-ai/flux-pro/v1.1',
-  'fal-ai/flux-pro/kontext'
-] as const;
 const elevenLabsClients = new Map<string, ElevenLabsClient>();
+const googleGenAiClients = new Map<string, GoogleGenAI>();
 
 async function loadSharp(): Promise<SharpLike | null> {
   if (cachedSharp) {
@@ -87,10 +83,61 @@ async function resolveVideoModel(
   return desired;
 }
 
+function isHttp404Error(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  return /\b404\b/.test(error.message);
+}
+
+function isGeminiUnavailableError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const message = error.message.toLowerCase();
+  return message.includes('"status":"unavailable"') || /\b503\b/.test(message);
+}
+
+async function retryGeminiUnavailable<T>(
+  operation: () => Promise<T>,
+  maxAttempts = 3
+): Promise<T> {
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (!isGeminiUnavailableError(error) || attempt === maxAttempts) {
+        throw error;
+      }
+      const delayMs = attempt * 2000;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
 async function ensureOk(res: Response, label: string): Promise<void> {
   if (!res.ok) {
     throw new Error(`${label} failed: ${res.status} ${await res.text()}`);
   }
+}
+
+async function formatHttpErrorDetails(res: Response, label: string): Promise<string> {
+  const rawBody = await res.text();
+  let parsedBody: unknown = null;
+  if (rawBody.trim()) {
+    try {
+      parsedBody = JSON.parse(rawBody);
+    } catch {
+      parsedBody = null;
+    }
+  }
+  const detail = parsedBody
+    ? JSON.stringify(parsedBody)
+    : rawBody.trim() || '<empty response body>';
+  return `${label} failed: ${res.status} ${res.statusText} (${res.url}) - ${detail}`;
 }
 
 async function callOpenAiChat(model: string, prompt: string, apiKey: string): Promise<string> {
@@ -460,68 +507,72 @@ async function geminiGenerateVideoFromImage(
   outputPathWithoutExt: string
 ): Promise<{ filePath: string; metadata: Record<string, unknown> }> {
   const firstFrameBytes = readFileSync(firstFrameAssetPath);
-  const firstFrameExtension = firstFrameAssetPath.split('.').pop()?.toLowerCase() ?? 'png';
-  const firstFrameMime = firstFrameExtension === 'jpg' ? 'image/jpeg' : `image/${firstFrameExtension}`;
+  const firstFrameMime = mimeTypeFromImagePath(firstFrameAssetPath);
+  const ai = (() => {
+    const cached = googleGenAiClients.get(apiKey);
+    if (cached) return cached;
+    const created = new GoogleGenAI({ apiKey });
+    googleGenAiClients.set(apiKey, created);
+    return created;
+  })();
 
-  const createRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateVideos?key=${apiKey}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+  let operation = await retryGeminiUnavailable(() =>
+    ai.models.generateVideos({
+      model,
       prompt,
       image: {
-        inlineData: {
-          mimeType: firstFrameMime,
-          data: firstFrameBytes.toString('base64')
-        }
+        imageBytes: firstFrameBytes.toString('base64'),
+        mimeType: firstFrameMime
       }
     })
-  });
-  await ensureOk(createRes, 'Gemini video create');
-  const created = (await createRes.json()) as { name?: string; done?: boolean };
-  if (!created.name) {
-    throw new Error('Gemini video create did not return operation name');
-  }
+  );
 
-  const operationName = created.name;
   const deadlineMs = Date.now() + 5 * 60 * 1000;
-  let done = created.done ?? false;
-  let responsePayload: Record<string, unknown> | null = null;
-
-  while (!done && Date.now() < deadlineMs) {
+  while (!operation.done && Date.now() < deadlineMs) {
     await new Promise((resolve) => setTimeout(resolve, 3000));
-    const statusRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/${operationName}?key=${apiKey}`);
-    await ensureOk(statusRes, 'Gemini video status');
-    const statusData = (await statusRes.json()) as {
-      done?: boolean;
-      response?: Record<string, unknown>;
-      error?: { message?: string };
-    };
-    if (statusData.error?.message) {
-      throw new Error(`Gemini video operation failed: ${statusData.error.message}`);
-    }
-    done = statusData.done ?? false;
-    responsePayload = statusData.response ?? null;
+    operation = await retryGeminiUnavailable(() =>
+      ai.operations.getVideosOperation({ operation })
+    );
   }
 
-  if (!done || !responsePayload) {
+  if (!operation.done) {
     throw new Error('Gemini video generation timed out');
   }
-
-  const generatedVideos = (responsePayload['generatedVideos'] as Array<Record<string, unknown>> | undefined) ?? [];
-  const video = generatedVideos[0]?.['video'] as { uri?: string; videoBytes?: string } | undefined;
-  if (!video) {
+  const response = operation.response as
+    | {
+        generatedVideos?: Array<{ video?: { uri?: string; videoBytes?: string; bytesBase64Encoded?: string } }>;
+        generateVideoResponse?: {
+          generatedSamples?: Array<{ video?: { uri?: string; videoBytes?: string; bytesBase64Encoded?: string } }>;
+        };
+      }
+    | undefined;
+  const generatedVideo = response?.generatedVideos?.[0]?.video;
+  const generatedSampleVideo =
+    response?.generateVideoResponse?.generatedSamples?.[0]?.video;
+  const video = {
+    uri: generatedVideo?.uri ?? generatedSampleVideo?.uri,
+    videoBytes:
+      generatedVideo?.videoBytes ??
+      generatedVideo?.bytesBase64Encoded ??
+      generatedSampleVideo?.videoBytes ??
+      generatedSampleVideo?.bytesBase64Encoded
+  };
+  if (!video.uri && !video.videoBytes) {
     throw new Error('Gemini video generation returned no video');
   }
 
   if (video.videoBytes) {
     const filePath = `${outputPathWithoutExt}.mp4`;
     writeFileSync(filePath, Buffer.from(video.videoBytes, 'base64'));
-    return { filePath, metadata: { operationName, source: 'videoBytes' } };
+    return { filePath, metadata: { operationName: operation.name, source: 'videoBytes' } };
   }
 
   if (video.uri) {
-    const filePath = await downloadToFile(video.uri, outputPathWithoutExt);
-    return { filePath, metadata: { operationName, source: 'uri' } };
+    const videoUrl = video.uri.includes('key=')
+      ? video.uri
+      : `${video.uri}${video.uri.includes('?') ? '&' : '?'}key=${encodeURIComponent(apiKey)}`;
+    const filePath = await downloadToFile(videoUrl, outputPathWithoutExt);
+    return { filePath, metadata: { operationName: operation.name, source: 'uri' } };
   }
 
   throw new Error('Gemini video payload missing video bytes/uri');
@@ -623,8 +674,40 @@ export async function listProviderModels(provider: ProviderName, apiKey?: string
   }
 
   if (provider === 'fal') {
-    // fal.ai does not provide a public generic model listing endpoint; return curated Flux choices.
-    return [...falFluxModels];
+    const falModelEndpoints = ['https://api.fal.ai/v1/models?limit=500', 'https://api.fal.ai/v1/models'];
+    let lastError: unknown = null;
+
+    for (const endpoint of falModelEndpoints) {
+      try {
+        const res = await fetch(endpoint, {
+          headers: { Authorization: falAuthHeader(key) }
+        });
+        if (!res.ok) {
+          throw new Error(await formatHttpErrorDetails(res, 'fal.ai list models'));
+        }
+
+        const payload = (await res.json()) as
+          | Array<{ id?: string; model_id?: string; modelId?: string; name?: string }>
+          | { models?: Array<{ id?: string; model_id?: string; modelId?: string; name?: string }> };
+        const rows = Array.isArray(payload) ? payload : (payload.models ?? []);
+        const ids = rows
+          .map((item) => item.model_id ?? item.modelId ?? item.id ?? item.name ?? '')
+          .map((value) => value.trim())
+          .filter((value): value is string => Boolean(value));
+        const fluxIds = ids.filter((value) => /(^|\/)flux([-/]|$)|\bflux\b/i.test(value));
+        if (fluxIds.length > 0) {
+          return [...new Set(fluxIds)].sort();
+        }
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw new Error(
+      `Failed to load fal.ai Flux models dynamically: ${
+        lastError instanceof Error ? lastError.message : String(lastError)
+      }`
+    );
   }
 
   if (provider === 'elevenlabs') {
@@ -725,19 +808,50 @@ export async function generateVideoFromImage(options: {
       `${mapping.provider} has no compatible video model available. Validate the provider key and reload models in Settings.`
     );
   }
-
+  let modelUsed = resolvedModel;
   const generated =
     mapping.provider === 'openai'
       ? await openAiGenerateVideoFromImage(resolvedModel, options.prompt, copiedFrame, key, outputPathWithoutExt)
       : mapping.provider === 'gemini'
-        ? await geminiGenerateVideoFromImage(resolvedModel, options.prompt, copiedFrame, key, outputPathWithoutExt)
+        ? await (async () => {
+            const available = await listProviderModels(mapping.provider, key);
+            const compatible = getCompatibleVideoModelsForProvider(mapping.provider, available);
+            const modelCandidates = [
+              resolvedModel,
+              ...compatible.filter((candidate) => candidate !== resolvedModel)
+            ];
+            let lastError: unknown = null;
+            for (const candidate of modelCandidates) {
+              try {
+                modelUsed = candidate;
+                return await geminiGenerateVideoFromImage(
+                  candidate,
+                  options.prompt,
+                  copiedFrame,
+                  key,
+                  outputPathWithoutExt
+                );
+              } catch (error) {
+                lastError = error;
+                if (!isHttp404Error(error)) {
+                  throw error;
+                }
+              }
+            }
+            throw new Error(
+              `Gemini video generation failed for all compatible models: ${modelCandidates.join(', ')}`,
+              {
+                cause: lastError
+              }
+            );
+          })()
         : (() => {
             throw new Error(`${mapping.provider} is currently not supported for video generation.`);
           })();
 
   return {
     provider: mapping.provider,
-    model: resolvedModel,
+    model: modelUsed,
     filePath: generated.filePath,
     metadataJson: JSON.stringify({
       prompt: options.prompt,

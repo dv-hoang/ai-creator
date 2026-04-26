@@ -144,6 +144,11 @@ export function App() {
   const [generatingSceneIds, setGeneratingSceneIds] = useState<Set<string>>(
     () => new Set(),
   );
+  const [generatingVideoSceneIds, setGeneratingVideoSceneIds] = useState<
+    Set<string>
+  >(() => new Set());
+  const [videoGenerationStatusBySceneId, setVideoGenerationStatusBySceneId] =
+    useState<Record<string, string>>({});
   const [settingsLoadError, setSettingsLoadError] = useState<string | null>(
     null,
   );
@@ -592,6 +597,7 @@ export function App() {
 
   async function generateSceneVideo(scene: Scene) {
     if (!electronApi) return;
+    if (generatingVideoSceneIds.has(scene.id)) return;
     const imageAsset = (assetsByEntity.get(`scene:${scene.id}`) ?? []).find(
       (asset) => asset.kind === "image",
     );
@@ -607,9 +613,33 @@ export function App() {
     }
 
     setBusy(true);
+    setGeneratingVideoSceneIds((previous) => {
+      const next = new Set(previous);
+      next.add(scene.id);
+      return next;
+    });
+    setVideoGenerationStatusBySceneId((previous) => ({
+      ...previous,
+      [scene.id]:
+        locale === "vi"
+          ? "Đang xếp hàng tạo video..."
+          : "Queued for video generation...",
+    }));
     try {
+      setVideoGenerationStatusBySceneId((previous) => ({
+        ...previous,
+        [scene.id]:
+          locale === "vi" ? "Đang tạo video..." : "Generating video...",
+      }));
       await electronApi.scenes.generateVideo(scene.id, imageAsset.id);
       if (workspace) await refreshWorkspace(workspace.project.id);
+      setVideoGenerationStatusBySceneId((previous) => ({
+        ...previous,
+        [scene.id]:
+          locale === "vi"
+            ? "Tạo video thành công."
+            : "Video generation completed.",
+      }));
       enqueueSnackbar(
         locale === "vi"
           ? `Đã tạo video cho cảnh ${scene.sceneIndex}`
@@ -627,7 +657,21 @@ export function App() {
             : `Failed to generate video for scene ${scene.sceneIndex}`,
         { variant: "error" },
       );
+      setVideoGenerationStatusBySceneId((previous) => ({
+        ...previous,
+        [scene.id]:
+          error instanceof Error
+            ? error.message
+            : locale === "vi"
+              ? "Tạo video thất bại."
+              : "Video generation failed.",
+      }));
     } finally {
+      setGeneratingVideoSceneIds((previous) => {
+        const next = new Set(previous);
+        next.delete(scene.id);
+        return next;
+      });
       setBusy(false);
     }
   }
@@ -1191,6 +1235,8 @@ export function App() {
                 scenes={workspace.scenes}
                 assetsByEntity={assetsByEntity}
                 generatingSceneIds={generatingSceneIds}
+                generatingVideoSceneIds={generatingVideoSceneIds}
+                videoGenerationStatusBySceneId={videoGenerationStatusBySceneId}
                 selectedAssetIds={selectedAssetIds}
                 onOpenLightbox={(src, alt) => setLightboxImage({ src, alt })}
                 onToggleAsset={(assetId) =>
