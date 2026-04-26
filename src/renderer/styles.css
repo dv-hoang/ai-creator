@@ -291,6 +291,23 @@ select {
   gap: 6px;
 }
 
+.visual-style-field {
+  display: grid;
+  gap: 6px;
+}
+
+.visual-style-columns {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 220px;
+  gap: 12px;
+  align-items: start;
+}
+
+.visual-style-left-col {
+  display: grid;
+  gap: 8px;
+}
+
 .create-project-actions {
   justify-content: flex-end;
 }
@@ -351,6 +368,37 @@ select {
   background:
     linear-gradient(180deg, rgba(59, 130, 246, 0.2), rgba(30, 64, 175, 0.08)),
     rgba(15, 23, 42, 0.7);
+}
+
+.visual-style-preview {
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: rgba(2, 6, 23, 0.45);
+  overflow: hidden;
+  display: grid;
+  width: 220px;
+  max-width: 220px;
+}
+
+.visual-style-preview-image {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  background-repeat: no-repeat;
+  background-size: 500% 300%;
+  background-color: #0f172a;
+}
+
+.visual-style-preview-caption {
+  padding: 6px 9px;
+  font-size: 11px;
+  color: #cbd5e1;
+  border-top: 1px solid #334155;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .workspace header {
@@ -877,7 +925,8 @@ textarea:focus {
   .info-grid,
   .table-row,
   .character-layout,
-  .scene-layout {
+  .scene-layout,
+  .visual-style-columns {
     grid-template-columns: 1fr;
   }
 

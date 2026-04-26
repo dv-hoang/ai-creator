@@ -13,6 +13,7 @@ import type {
   TranscriptRow,
   UpdateCheckResult,
 } from "@shared/types";
+import visualStyleGridImage from "../assets/visual-styles/style-grid.png";
 
 const languageOptions = [
   { label: "English", value: "en" },
@@ -34,7 +35,34 @@ const visualStyleOptions = [
   "Claymation",
   "Disney 2D",
   "Stick Figure",
+  "Watercolor",
+  "Ink Sketch",
+  "Low Poly 3D",
+  "Voxel / Pixel 3D",
+  "Retro Pixel Art (2D)",
+  "Comic Book",
+  "Flat Design / Vector",
+  "Line Art",
+  "Chibi",
+  "Realistic Photo",
 ] as const;
+const visualStylePreviewPositions: Record<(typeof visualStyleOptions)[number], string> = {
+  "Pixar 3D": "1.5% 0%",
+  "Studio Ghibli": "25.5% 0.5%",
+  Claymation: "50.5% 0%",
+  "Disney 2D": "74.5% 0%",
+  "Stick Figure": "99.5% 1%",
+  Watercolor: "1% 49%",
+  "Ink Sketch": "25.5% 50%",
+  "Low Poly 3D": "50.5% 49.5%",
+  "Voxel / Pixel 3D": "74.5% 50.5%",
+  "Retro Pixel Art (2D)": "99% 50.5%",
+  "Comic Book": "0.5% 100%",
+  "Flat Design / Vector": "25.5% 100%",
+  "Line Art": "50% 100%",
+  Chibi: "74.5% 100%",
+  "Realistic Photo": "99% 100%",
+};
 const providers = [
   { label: "OpenAI", value: "openai" },
   { label: "Gemini", value: "gemini" },
@@ -1017,79 +1045,102 @@ export function App() {
                 ))}
               </select>
               <div className="aspect-ratio-preview-grid" aria-hidden="true">
-                {aspectRatioPresets.map((preset) => (
-                    (() => {
-                      const previewMaxWidth = 56;
-                      const previewMaxHeight = 40;
-                      const scale = Math.min(
-                        previewMaxWidth / preset.width,
-                        previewMaxHeight / preset.height,
-                      );
-                      const previewWidth = Math.round(preset.width * scale);
-                      const previewHeight = Math.round(preset.height * scale);
-                      return (
-                  <button
-                    key={preset.value}
-                    type="button"
-                    className={`aspect-ratio-preview${
-                      projectForm.aspectRatio === preset.value ? " active" : ""
-                    }`}
-                    onClick={() =>
+                {aspectRatioPresets.map((preset) =>
+                  (() => {
+                    const previewMaxWidth = 56;
+                    const previewMaxHeight = 40;
+                    const scale = Math.min(
+                      previewMaxWidth / preset.width,
+                      previewMaxHeight / preset.height,
+                    );
+                    const previewWidth = Math.round(preset.width * scale);
+                    const previewHeight = Math.round(preset.height * scale);
+                    return (
+                      <button
+                        key={preset.value}
+                        type="button"
+                        className={`aspect-ratio-preview${
+                          projectForm.aspectRatio === preset.value
+                            ? " active"
+                            : ""
+                        }`}
+                        onClick={() =>
+                          setProjectForm({
+                            ...projectForm,
+                            aspectRatio: preset.value,
+                          })
+                        }
+                      >
+                        <span className="aspect-ratio-preview-label">
+                          {preset.value}
+                        </span>
+                        <span className="aspect-ratio-preview-box-wrap">
+                          <span
+                            className="aspect-ratio-preview-box"
+                            style={{
+                              width: `${previewWidth}px`,
+                              height: `${previewHeight}px`,
+                            }}
+                          />
+                        </span>
+                      </button>
+                    );
+                  })(),
+                )}
+              </div>
+            </label>
+            <div className="visual-style-field">
+              <span>{t("Visual Style", "Phong cách hình ảnh")}</span>
+              <div className="visual-style-columns">
+                <div className="visual-style-left-col">
+                  <select
+                    value={projectForm.visualStyle}
+                    onChange={(event) =>
                       setProjectForm({
                         ...projectForm,
-                        aspectRatio: preset.value,
+                        visualStyle: event.target.value,
                       })
                     }
                   >
-                    <span className="aspect-ratio-preview-label">
-                      {preset.value}
-                    </span>
-                    <span className="aspect-ratio-preview-box-wrap">
-                      <span
-                        className="aspect-ratio-preview-box"
-                        style={{
-                            width: `${previewWidth}px`,
-                            height: `${previewHeight}px`,
-                        }}
-                      />
-                    </span>
-                  </button>
-                      );
-                    })()
-                ))}
+                    {visualStyleOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                  <label>
+                    {t("Art Direction Hint", "Gợi ý định hướng nghệ thuật")}
+                    <textarea
+                      rows={4}
+                      value={projectForm.artDirectionHint}
+                      onChange={(event) =>
+                        setProjectForm({
+                          ...projectForm,
+                          artDirectionHint: event.target.value,
+                        })
+                      }
+                    />
+                  </label>
+                </div>
+                <div className="visual-style-preview" aria-live="polite">
+                  <div
+                    role="img"
+                    aria-label={`${projectForm.visualStyle} example`}
+                    className="visual-style-preview-image"
+                    style={{
+                      backgroundImage: `url(${visualStyleGridImage})`,
+                      backgroundPosition:
+                        visualStylePreviewPositions[
+                          projectForm.visualStyle as (typeof visualStyleOptions)[number]
+                        ] ?? "50% 50%",
+                    }}
+                  />
+                  <span className="visual-style-preview-caption">
+                    {t("Preview", "Xem trước")}: {projectForm.visualStyle}
+                  </span>
+                </div>
               </div>
-            </label>
-            <label>
-              {t("Visual Style", "Phong cách hình ảnh")}
-              <select
-                value={projectForm.visualStyle}
-                onChange={(event) =>
-                  setProjectForm({
-                    ...projectForm,
-                    visualStyle: event.target.value,
-                  })
-                }
-              >
-                {visualStyleOptions.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              {t("Art Direction Hint", "Gợi ý định hướng nghệ thuật")}
-              <textarea
-                rows={4}
-                value={projectForm.artDirectionHint}
-                onChange={(event) =>
-                  setProjectForm({
-                    ...projectForm,
-                    artDirectionHint: event.target.value,
-                  })
-                }
-              />
-            </label>
+            </div>
 
             <div className="inline-row create-project-actions">
               <button
@@ -1558,23 +1609,29 @@ function ScenesView(props: {
                     }
                   />
                 </label>
-                <div className="inline-row">
-                  <button
-                    className="btn"
-                    onClick={() => void props.onGenerateImage(scene)}
-                    disabled={props.generatingSceneIds.has(scene.id)}
-                  >
-                    {props.generatingSceneIds.has(scene.id)
-                      ? t("Generating...", "Đang tạo...")
-                      : t("Generate Scene Image", "Tạo ảnh cảnh")}
-                  </button>
-                  <button
-                    className="btn"
-                    onClick={() => void props.onGenerateVideo(scene)}
-                  >
-                    {t("Generate Video", "Tạo video")}
-                  </button>
-                </div>
+                {(props.canGenerateImage || props.canGenerateVideo) && (
+                  <div className="inline-row">
+                    {props.canGenerateImage && (
+                      <button
+                        className="btn"
+                        onClick={() => void props.onGenerateImage(scene)}
+                        disabled={props.generatingSceneIds.has(scene.id)}
+                      >
+                        {props.generatingSceneIds.has(scene.id)
+                          ? t("Generating...", "Đang tạo...")
+                          : t("Generate Scene Image", "Tạo ảnh cảnh")}
+                      </button>
+                    )}
+                    {props.canGenerateVideo && (
+                      <button
+                        className="btn"
+                        onClick={() => void props.onGenerateVideo(scene)}
+                      >
+                        {t("Generate Video", "Tạo video")}
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </article>
