@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSnackbar } from "notistack";
 import type {
   AppSettings,
@@ -65,9 +65,9 @@ export function App() {
   const [electronApi, setElectronApi] = useState<
     typeof window.electronApi | null
   >(window.electronApi ?? null);
-  const [activePage, setActivePage] = useState<"workspace" | "settings">(
-    "workspace",
-  );
+  const [activePage, setActivePage] = useState<
+    "workspace" | "settings" | "createProject"
+  >("workspace");
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [workspace, setWorkspace] = useState<ProjectWorkspace | null>(null);
   const [assets, setAssets] = useState<AssetRecord[]>([]);
@@ -75,7 +75,6 @@ export function App() {
   const [selectedTab, setSelectedTab] = useState<
     "Info" | "Characters" | "Scenes" | "Transcript"
   >("Info");
-  const [showCreateProject, setShowCreateProject] = useState(false);
   const [projectForm, setProjectForm] =
     useState<ProjectInput>(emptyProjectInput);
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
@@ -93,7 +92,7 @@ export function App() {
   const [settingsLoadError, setSettingsLoadError] = useState<string | null>(
     null,
   );
-  const [checkingUpdate, setCheckingUpdate] = useState(false);
+
   const [latestUpdate, setLatestUpdate] = useState<UpdateCheckResult | null>(
     null,
   );
@@ -107,6 +106,8 @@ export function App() {
   const { enqueueSnackbar } = useSnackbar();
   const locale = settings?.language ?? "en";
   const t = (en: string, vi: string) => (locale === "vi" ? vi : en);
+  const canGenerateImage = settings?.generationEnabled.generateImage ?? true;
+  const canGenerateVideo = settings?.generationEnabled.generateVideo ?? true;
 
   useEffect(() => {
     if (electronApi) {
@@ -274,7 +275,7 @@ export function App() {
       const created = await electronApi.projects.create(projectForm);
       setWorkspace(created);
       setSelectedTab("Info");
-      setShowCreateProject(false);
+      setActivePage("workspace");
       setProjectForm(emptyProjectInput);
       await refreshProjects();
       const nextAssets = await electronApi.assets.listByProject(
@@ -529,35 +530,6 @@ export function App() {
     );
   }
 
-  async function handleCheckForUpdates() {
-    if (!electronApi || !settings) return;
-    setCheckingUpdate(true);
-    try {
-      const result = await electronApi.settings.checkForUpdates();
-      setLatestUpdate(result);
-      if (result.hasUpdate) {
-        setShowUpdateAvailableModal(true);
-      } else {
-        enqueueSnackbar(
-          t(
-            `You are up to date (${result.currentVersion})`,
-            `Bạn đang dùng bản mới nhất (${result.currentVersion})`,
-          ),
-          { variant: "success" },
-        );
-      }
-    } catch (error) {
-      enqueueSnackbar(
-        error instanceof Error
-          ? error.message
-          : t("Failed to check updates.", "Không thể kiểm tra cập nhật."),
-        { variant: "error" },
-      );
-    } finally {
-      setCheckingUpdate(false);
-    }
-  }
-
   async function handleOpenLatestRelease() {
     if (!electronApi || !latestUpdate?.releaseUrl) return;
     try {
@@ -615,7 +587,7 @@ export function App() {
       return;
     }
 
-    setShowCreateProject(true);
+    setActivePage("createProject");
   }
 
   if (!electronApi) {
@@ -644,17 +616,10 @@ export function App() {
       <aside className="sidebar panel">
         <div className="brand-block">
           <h1>AI Creator</h1>
-          <p className="muted">{t("Desktop Studio", "Studio Desktop")}</p>
-          <div className="brand-versions muted">
-            <p className="brand-versions-line">
-              {t("Current", "Hiện tại")}:{" "}
-              {appVersion ?? latestUpdate?.currentVersion ?? "—"}
-            </p>
-            <p className="brand-versions-line">
-              {t("Latest", "Mới nhất")}:{" "}
-              {latestUpdate?.latestVersion ?? "—"}
-            </p>
-          </div>
+          <p className="muted">
+            {t("Version", "Phiên bản")}:{" "}
+            {appVersion ?? latestUpdate?.currentVersion ?? "—"}
+          </p>
         </div>
 
         <div className="nav-stack">
@@ -737,39 +702,6 @@ export function App() {
                     ))}
                   </select>
                 </label>
-                <div className="panel-subtle">
-                  <label>
-                    {t("App Update", "Cập nhật ứng dụng")}
-                    <div className="inline-row">
-                      <button
-                        className="btn"
-                        onClick={() => void handleCheckForUpdates()}
-                        disabled={checkingUpdate}
-                      >
-                        {checkingUpdate
-                          ? t("Checking...", "Đang kiểm tra...")
-                          : t("Check Update", "Kiểm tra cập nhật")}
-                      </button>
-                    </div>
-                  </label>
-                  {latestUpdate && (
-                    <div className="muted">
-                      <p>
-                        {t("Current", "Hiện tại")}:{" "}
-                        {latestUpdate.currentVersion} •{" "}
-                        {t("Latest", "Mới nhất")}: {latestUpdate.latestVersion}
-                      </p>
-                      {latestUpdate.hasUpdate && (
-                        <button
-                          className="btn"
-                          onClick={() => void handleOpenLatestRelease()}
-                        >
-                          {t("Open Latest Release", "Mở release mới nhất")}
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
 
                 <div className="provider-keys">
                   {providers.map((provider) => (
@@ -800,6 +732,62 @@ export function App() {
                       </div>
                     </label>
                   ))}
+                </div>
+
+                <div className="panel-subtle generation-toggles p-2">
+                  <strong>
+                    {t("Generation Controls", "Điều khiển tạo nội dung")}
+                  </strong>
+                  <div className="generation-toggle-row">
+                    <span>
+                      {t(
+                        "Enable Generate Image buttons (Characters & Scenes)",
+                        "Bật nút tạo ảnh (Nhân vật & Cảnh)",
+                      )}
+                    </span>
+                    <label className="switch" aria-label={t("Toggle generate image", "Bật/tắt tạo ảnh")}>
+                      <input
+                        type="checkbox"
+                        checked={settings.generationEnabled.generateImage}
+                        onChange={() =>
+                          setSettings({
+                            ...settings,
+                            generationEnabled: {
+                              ...settings.generationEnabled,
+                              generateImage:
+                                !settings.generationEnabled.generateImage,
+                            },
+                          })
+                        }
+                      />
+                      <span className="switch-slider" />
+                    </label>
+                  </div>
+                  <div className="generation-toggle-row">
+                    <span>
+                      {t(
+                        "Enable Generate Video button (Scenes)",
+                        "Bật nút tạo video (Cảnh)",
+                      )}
+                    </span>
+                    <label className="switch" aria-label={t("Toggle generate video", "Bật/tắt tạo video")}>
+                      <input
+                        type="checkbox"
+                        checked={settings.generationEnabled.generateVideo}
+                        onChange={() =>
+                          setSettings({
+                            ...settings,
+                            generationEnabled: {
+                              ...settings.generationEnabled,
+                              generateVideo:
+                                !settings.generationEnabled.generateVideo,
+                            },
+                          })
+                        }
+                      />
+                      <span className="switch-slider" />
+                    </label>
+                  </div>
                 </div>
 
                 {(
@@ -921,177 +909,178 @@ export function App() {
                       {project.aspectRatio} • {project.status}
                     </small>
                   </button>
-                  {project.status === "error" && (
-                    <button
-                      type="button"
-                      className="btn btn-primary project-card-retry"
-                      disabled={retryingScriptProjectId === project.id}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void handleRetryGenerateScript(project.id);
-                      }}
-                    >
-                      {retryingScriptProjectId === project.id
-                        ? t("Retrying...", "Đang thử lại...")
-                        : t("Retry script generation", "Tạo lại kịch bản")}
-                    </button>
-                  )}
                 </div>
               ))}
             </div>
           </section>
         )}
 
-        {showCreateProject && (
-          <section className="modal">
-            <div className="modal-card panel">
-              <div className="section-head">
-                <h2>{t("Create Project", "Tạo dự án")}</h2>
-                <span className="pill">
-                  {t("Step 1 Setup", "Thiết lập Bước 1")}
-                </span>
-              </div>
+        {activePage === "createProject" && (
+          <section className="create-project-view panel">
+            <div className="section-head">
+              <h2>{t("Create Project", "Tạo dự án")}</h2>
+              <span className="pill">
+                {t("Step 1 Setup", "Thiết lập Bước 1")}
+              </span>
+            </div>
+            <label>
+              {t("Title", "Tiêu đề")}
+              <input
+                value={projectForm.title}
+                onChange={(event) =>
+                  setProjectForm({
+                    ...projectForm,
+                    title: event.target.value,
+                  })
+                }
+              />
+            </label>
+            <label>
+              {t("Content (ORIGINAL_CONTENT)", "Nội dung (ORIGINAL_CONTENT)")}
+              <textarea
+                value={projectForm.originalContent}
+                rows={8}
+                onChange={(event) =>
+                  setProjectForm({
+                    ...projectForm,
+                    originalContent: event.target.value,
+                  })
+                }
+              />
+            </label>
+            <div className="two-col">
               <label>
-                {t("Title", "Tiêu đề")}
-                <input
-                  value={projectForm.title}
-                  onChange={(event) =>
-                    setProjectForm({
-                      ...projectForm,
-                      title: event.target.value,
-                    })
-                  }
-                />
-              </label>
-              <label>
-                {t("Content (ORIGINAL_CONTENT)", "Nội dung (ORIGINAL_CONTENT)")}
-                <textarea
-                  value={projectForm.originalContent}
-                  rows={6}
-                  onChange={(event) =>
-                    setProjectForm({
-                      ...projectForm,
-                      originalContent: event.target.value,
-                    })
-                  }
-                />
-              </label>
-              <div className="two-col">
-                <label>
-                  {t("Prompt Language", "Ngôn ngữ prompt")}
-                  <select
-                    value={projectForm.promptLanguage}
-                    onChange={(event) =>
-                      setProjectForm({
-                        ...projectForm,
-                        promptLanguage: event.target
-                          .value as ProjectInput["promptLanguage"],
-                      })
-                    }
-                  >
-                    {promptLanguageOptions.map((option) => (
-                      <option key={option}>{option}</option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  {t("Story Language", "Ngôn ngữ câu chuyện")}
-                  <select
-                    value={projectForm.transcriptLanguagePolicy}
-                    onChange={(event) =>
-                      setProjectForm({
-                        ...projectForm,
-                        transcriptLanguagePolicy: event.target
-                          .value as ProjectInput["transcriptLanguagePolicy"],
-                      })
-                    }
-                  >
-                    {promptLanguageOptions.map((option) => (
-                      <option key={option}>{option}</option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  {t("Size / Aspect Ratio", "Kích thước / Tỷ lệ")}
-                  <div className="aspect-ratio-picker">
-                    {aspectRatioPresets.map((preset) => (
-                      <button
-                        key={preset.value}
-                        type="button"
-                        className={`aspect-ratio-item ${projectForm.aspectRatio === preset.value ? "active" : ""}`}
-                        onClick={() =>
-                          setProjectForm({
-                            ...projectForm,
-                            aspectRatio: preset.value,
-                          })
-                        }
-                      >
-                        <span
-                          className="ratio-icon"
-                          style={
-                            {
-                              "--ratio-w": String(preset.width),
-                              "--ratio-h": String(preset.height),
-                            } as CSSProperties
-                          }
-                        >
-                          <span className="ratio-frame" />
-                        </span>
-                        <span>{preset.value}</span>
-                      </button>
-                    ))}
-                  </div>
-                </label>
-              </div>
-              <label>
-                {t("Visual Style", "Phong cách hình ảnh")}
+                {t("Prompt Language", "Ngôn ngữ prompt")}
                 <select
-                  value={projectForm.visualStyle}
+                  value={projectForm.promptLanguage}
                   onChange={(event) =>
                     setProjectForm({
                       ...projectForm,
-                      visualStyle: event.target.value,
+                      promptLanguage: event.target
+                        .value as ProjectInput["promptLanguage"],
                     })
                   }
                 >
-                  {visualStyleOptions.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
+                  {promptLanguageOptions.map((option) => (
+                    <option key={option}>{option}</option>
                   ))}
                 </select>
               </label>
               <label>
-                {t("Art Direction Hint", "Gợi ý định hướng nghệ thuật")}
-                <textarea
-                  rows={3}
-                  value={projectForm.artDirectionHint}
+                {t("Story Language", "Ngôn ngữ câu chuyện")}
+                <select
+                  value={projectForm.transcriptLanguagePolicy}
                   onChange={(event) =>
                     setProjectForm({
                       ...projectForm,
-                      artDirectionHint: event.target.value,
+                      transcriptLanguagePolicy: event.target
+                        .value as ProjectInput["transcriptLanguagePolicy"],
                     })
                   }
-                />
-              </label>
-
-              <div className="inline-row modal-actions">
-                <button
-                  className="btn"
-                  onClick={() => setShowCreateProject(false)}
                 >
-                  {t("Cancel", "Hủy")}
-                </button>
-                <button
-                  className="btn btn-primary"
-                  onClick={() => void handleCreateProject()}
-                  disabled={
-                    busy || !projectForm.title || !projectForm.originalContent
+                  {promptLanguageOptions.map((option) => (
+                    <option key={option}>{option}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                {t("Size / Aspect Ratio", "Kích thước / Tỷ lệ")}
+                <select
+                  value={projectForm.aspectRatio}
+                  onChange={(event) =>
+                    setProjectForm({
+                      ...projectForm,
+                      aspectRatio: event.target.value,
+                    })
                   }
                 >
-                  {t("Create", "Tạo")}
-                </button>
-              </div>
+                  {aspectRatioPresets.map((preset) => (
+                    <option key={preset.value} value={preset.value}>
+                      {preset.value}
+                    </option>
+                  ))}
+                </select>
+                <div className="aspect-ratio-preview-grid" aria-hidden="true">
+                  {aspectRatioPresets.map((preset) => (
+                    <button
+                      key={preset.value}
+                      type="button"
+                      className={`aspect-ratio-preview${
+                        projectForm.aspectRatio === preset.value
+                          ? " active"
+                          : ""
+                      }`}
+                      onClick={() =>
+                        setProjectForm({
+                          ...projectForm,
+                          aspectRatio: preset.value,
+                        })
+                      }
+                    >
+                      <span className="aspect-ratio-preview-label">
+                        {preset.value}
+                      </span>
+                      <span className="aspect-ratio-preview-box-wrap">
+                        <span
+                          className="aspect-ratio-preview-box"
+                          style={{
+                            aspectRatio: `${preset.width} / ${preset.height}`,
+                          }}
+                        />
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </label>
+            </div>
+            <label>
+              {t("Visual Style", "Phong cách hình ảnh")}
+              <select
+                value={projectForm.visualStyle}
+                onChange={(event) =>
+                  setProjectForm({
+                    ...projectForm,
+                    visualStyle: event.target.value,
+                  })
+                }
+              >
+                {visualStyleOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              {t("Art Direction Hint", "Gợi ý định hướng nghệ thuật")}
+              <textarea
+                rows={4}
+                value={projectForm.artDirectionHint}
+                onChange={(event) =>
+                  setProjectForm({
+                    ...projectForm,
+                    artDirectionHint: event.target.value,
+                  })
+                }
+              />
+            </label>
+
+            <div className="inline-row create-project-actions">
+              <button
+                className="btn"
+                onClick={() => setActivePage("workspace")}
+              >
+                {t("Cancel", "Hủy")}
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() => void handleCreateProject()}
+                disabled={
+                  busy || !projectForm.title || !projectForm.originalContent
+                }
+              >
+                {t("Create", "Tạo")}
+              </button>
             </div>
           </section>
         )}
@@ -1177,10 +1166,7 @@ export function App() {
               <div className="workspace-script-error-banner" role="alert">
                 <div className="workspace-script-error-text">
                   <strong>
-                    {t(
-                      "Script generation failed",
-                      "Tạo kịch bản thất bại",
-                    )}
+                    {t("Script generation failed", "Tạo kịch bản thất bại")}
                   </strong>
                   {workspace.project.statusDetail ? (
                     <p className="muted">{workspace.project.statusDetail}</p>
@@ -1235,6 +1221,7 @@ export function App() {
                   )
                 }
                 onGenerateImage={regenerateCharacterImage}
+                canGenerateImage={canGenerateImage}
                 locale={locale}
                 onCopyPrompt={(character, prompt) =>
                   void copyPromptToClipboard(`${character.name} prompt`, prompt)
@@ -1258,6 +1245,8 @@ export function App() {
                 }
                 onGenerateImage={regenerateSceneImage}
                 onGenerateVideo={generateSceneVideo}
+                canGenerateImage={canGenerateImage}
+                canGenerateVideo={canGenerateVideo}
                 locale={locale}
                 onUpdatePrompts={updateScenePrompts}
                 onCopyTextPrompt={(scene, prompt) =>
@@ -1318,6 +1307,7 @@ function CharactersView(props: {
   onUpdatePrompt: (character: Character, prompt: string) => void;
   onToggleAsset: (assetId: string) => void;
   onGenerateImage: (character: Character) => void;
+  canGenerateImage: boolean;
   onCopyPrompt: (character: Character, prompt: string) => void;
   locale: "en" | "vi";
 }) {
@@ -1380,17 +1370,19 @@ function CharactersView(props: {
                     "Prompt text-to-image của nhân vật",
                   )}
                 />
-                <div className="inline-row">
-                  <button
-                    className="btn"
-                    onClick={() => void props.onGenerateImage(character)}
-                    disabled={props.generatingCharacterIds.has(character.id)}
-                  >
-                    {props.generatingCharacterIds.has(character.id)
-                      ? t("Generating...", "Đang tạo...")
-                      : t("Generate Image", "Tạo ảnh")}
-                  </button>
-                </div>
+                {props.canGenerateImage && (
+                  <div className="inline-row">
+                    <button
+                      className="btn"
+                      onClick={() => void props.onGenerateImage(character)}
+                      disabled={props.generatingCharacterIds.has(character.id)}
+                    >
+                      {props.generatingCharacterIds.has(character.id)
+                        ? t("Generating...", "Đang tạo...")
+                        : t("Generate Image", "Tạo ảnh")}
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </article>
@@ -1409,6 +1401,8 @@ function ScenesView(props: {
   onToggleAsset: (assetId: string) => void;
   onGenerateImage: (scene: Scene) => void;
   onGenerateVideo: (scene: Scene) => void;
+  canGenerateImage: boolean;
+  canGenerateVideo: boolean;
   onUpdatePrompts: (
     scene: Scene,
     nextTextToImage: string,

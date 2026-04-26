@@ -22,6 +22,10 @@ const defaultSettings: AppSettings = {
     generateScript: { provider: 'openai', model: 'gpt-5-mini' },
     generateImage: { provider: 'gemini', model: 'banana-2' },
     generateVideo: { provider: 'openai', model: 'veo-3' }
+  },
+  generationEnabled: {
+    generateImage: true,
+    generateVideo: true
   }
 };
 
@@ -293,7 +297,11 @@ function loadData(): AppData {
     settings: {
       ...defaultSettings,
       ...(parsed.settings ?? {}),
-      providerModels: parsed.settings?.providerModels ?? {}
+      providerModels: parsed.settings?.providerModels ?? {},
+      generationEnabled: {
+        ...defaultSettings.generationEnabled,
+        ...(parsed.settings?.generationEnabled ?? {})
+      }
     },
     projects
   };

@@ -12,6 +12,10 @@ export interface AppSettings {
   providerKeys: Partial<Record<ProviderName, string>>;
   providerModels: Partial<Record<ProviderName, string[]>>;
   taskModelMappings: Record<GenerationTask, TaskModelMapping>;
+  generationEnabled: {
+    generateImage: boolean;
+    generateVideo: boolean;
+  };
 }
 
 export interface ProjectInput {

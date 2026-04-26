@@ -1,6 +1,6 @@
 {
   "name": "ai-creator",
-  "version": "v0.1.3",
+  "version": "v0.1.4",
   "packageManager": "yarn@1.22.22",
   "main": "out/main/index.js",
   "type": "module",
