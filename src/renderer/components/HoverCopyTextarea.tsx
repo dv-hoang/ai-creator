@@ -4,13 +4,18 @@ export function HoverCopyTextarea(props: {
   onChange: (value: string) => void;
   onCopy: () => void;
   placeholder?: string;
+  readOnly?: boolean;
 }) {
   return (
     <div className="textarea-copy-wrap">
       <textarea
         rows={props.rows}
         value={props.value}
-        onChange={(event) => props.onChange(event.target.value)}
+        readOnly={props.readOnly}
+        onChange={(event) => {
+          if (props.readOnly) return;
+          props.onChange(event.target.value);
+        }}
         placeholder={props.placeholder}
       />
       <button

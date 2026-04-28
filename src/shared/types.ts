@@ -38,6 +38,7 @@ export interface ProjectRecord extends ProjectInput {
   id: string;
   status: 'draft' | 'processing' | 'ready' | 'error';
   statusDetail: string | null;
+  archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -164,10 +165,12 @@ export interface ElectronApi {
     checkForUpdates(): Promise<UpdateCheckResult>;
   };
   projects: {
-    list(): Promise<ProjectRecord[]>;
+    list(options?: { includeArchived?: boolean }): Promise<ProjectRecord[]>;
     create(input: ProjectInput): Promise<ProjectWorkspace>;
     getWorkspace(projectId: string): Promise<ProjectWorkspace>;
     retryGenerateScript(projectId: string): Promise<ProjectWorkspace>;
+    archive(projectId: string): Promise<ProjectRecord>;
+    unarchive(projectId: string): Promise<ProjectRecord>;
   };
   characters: {
     updatePrompt(characterId: string, prompt: string): Promise<Character>;
@@ -186,9 +189,18 @@ export interface ElectronApi {
   transcript: {
     untimedText(projectId: string): Promise<string>;
     exportSrt(projectId: string): Promise<string>;
-    generateSpeech(projectId: string): Promise<GenerationResult>;
-    generateSpeechAllInOne(projectId: string): Promise<GenerationResult>;
-    generateSpeechForScene(sceneId: string): Promise<GenerationResult>;
+    generateSpeech(
+      projectId: string,
+      options?: { speed?: number },
+    ): Promise<GenerationResult>;
+    generateSpeechAllInOne(
+      projectId: string,
+      options?: { speed?: number },
+    ): Promise<GenerationResult>;
+    generateSpeechForScene(
+      sceneId: string,
+      options?: { speed?: number },
+    ): Promise<GenerationResult>;
     updateRow(
       transcriptId: string,
       patch: {

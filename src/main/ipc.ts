@@ -14,6 +14,8 @@ import type {
 } from '@shared/types';
 import {
   createProject,
+  archiveProject,
+  unarchiveProject,
   getAsset,
   getAssetsByProject,
   getCharacter,
@@ -369,7 +371,7 @@ export function registerIpc(): void {
     return updateAppFromLatestRelease(repo || DEFAULT_RELEASE_REPO);
   });
 
-  bind('projects:list', () => listProjects());
+  bind('projects:list', (options?: { includeArchived?: boolean }) => listProjects(options));
   bind('projects:getWorkspace', (projectId) => getWorkspace(projectId));
   bind('projects:create', async (input: ProjectInput) => {
     const project = createProject(input);
@@ -389,6 +391,8 @@ export function registerIpc(): void {
     runStep1ScriptPipeline(getProject(projectId));
     return getWorkspace(projectId);
   });
+  bind('projects:archive', (projectId: string) => archiveProject(projectId));
+  bind('projects:unarchive', (projectId: string) => unarchiveProject(projectId));
 
   bind('characters:updatePrompt', (characterId: string, prompt: string) => updateCharacterPrompt(characterId, prompt));
   bind('characters:linkAsset', (characterId: string, assetId: string) => linkCharacterAsset(characterId, assetId));
@@ -534,7 +538,7 @@ export function registerIpc(): void {
 
     return exportSrt(projectId, saveResult.filePath);
   });
-  bind('transcript:generateSpeech', async (projectId: string) => {
+  bind('transcript:generateSpeech', async (projectId: string, options?: { speed?: number }) => {
     const rows = getTranscriptsByProject(projectId).filter((row) => row.text.trim());
     if (rows.length === 0) {
       throw new Error('Transcript is empty. Add transcript lines before generating speech.');
@@ -564,7 +568,8 @@ export function registerIpc(): void {
       const generated = await generateSpeech({
         projectId,
         text,
-        segments: [{ text, voiceId: group.voiceId }]
+        segments: [{ text, voiceId: group.voiceId }],
+        voiceSettings: options?.speed ? { speed: options.speed } : undefined
       });
       const renamedFilePath = withSceneSpeechFileName(generated.filePath, group.scene, group.speaker);
       renameSync(generated.filePath, renamedFilePath);
@@ -595,7 +600,7 @@ export function registerIpc(): void {
     }
     return { jobId: randomUUID(), asset: generatedAssets[generatedAssets.length - 1] };
   });
-  bind('transcript:generateSpeechAllInOne', async (projectId: string) => {
+  bind('transcript:generateSpeechAllInOne', async (projectId: string, options?: { speed?: number }) => {
     const rows = getTranscriptsByProject(projectId).filter((row) => row.text.trim());
     if (rows.length === 0) {
       throw new Error('Transcript is empty. Add transcript lines before generating speech.');
@@ -606,7 +611,8 @@ export function registerIpc(): void {
     }
     const generated = await generateSpeech({
       projectId,
-      text
+      text,
+      voiceSettings: options?.speed ? { speed: options.speed } : undefined
     });
     const asset = saveAsset({
       projectId,
@@ -626,7 +632,7 @@ export function registerIpc(): void {
     });
     return { jobId: randomUUID(), asset };
   });
-  bind('transcript:generateSpeechForScene', async (sceneId: string) => {
+  bind('transcript:generateSpeechForScene', async (sceneId: string, options?: { speed?: number }) => {
     const scene = findSceneById(sceneId);
     if (!scene) {
       throw new Error('Scene not found.');
@@ -656,7 +662,8 @@ export function registerIpc(): void {
       const generated = await generateSpeech({
         projectId: scene.projectId,
         text,
-        segments: [{ text, voiceId: group.voiceId }]
+        segments: [{ text, voiceId: group.voiceId }],
+        voiceSettings: options?.speed ? { speed: options.speed } : undefined
       });
       const renamedFilePath = withSceneSpeechFileName(generated.filePath, scene.sceneIndex, group.speaker);
       renameSync(generated.filePath, renamedFilePath);

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useSnackbar } from "notistack";
 import type {
   AppSettings,
@@ -121,6 +121,7 @@ export function App() {
     "general" | "providers" | "controls"
   >("general");
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
+  const [includeArchivedProjects, setIncludeArchivedProjects] = useState(false);
   const [workspace, setWorkspace] = useState<ProjectWorkspace | null>(null);
   const [assets, setAssets] = useState<AssetRecord[]>([]);
   const [settings, setSettings] = useState<AppSettings | null>(null);
@@ -134,6 +135,7 @@ export function App() {
     useState<ProjectInput>(emptyProjectInput);
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
   const [untimedTranscript, setUntimedTranscript] = useState("");
+  const [transcriptGenerateSpeed, setTranscriptGenerateSpeed] = useState(1.0);
   const [lightboxImage, setLightboxImage] = useState<{
     src: string;
     alt: string;
@@ -149,6 +151,10 @@ export function App() {
   >(() => new Set());
   const [videoGenerationStatusBySceneId, setVideoGenerationStatusBySceneId] =
     useState<Record<string, string>>({});
+  const [generatingTranscriptSpeech, setGeneratingTranscriptSpeech] =
+    useState(false);
+  const [generatingTranscriptSpeechScene, setGeneratingTranscriptSpeechScene] =
+    useState<number | null>(null);
   const [settingsLoadError, setSettingsLoadError] = useState<string | null>(
     null,
   );
@@ -175,6 +181,12 @@ export function App() {
   const showElevenLabsVoiceSettings =
     Boolean(elevenLabsKey) &&
     validatedProviderKeys.elevenlabs === elevenLabsKey;
+  const lastKnownProjectStatusRef = useRef<
+    Map<string, ProjectRecord["status"]>
+  >(new Map());
+  const lastNotifiedProjectStatusRef = useRef<
+    Map<string, ProjectRecord["status"]>
+  >(new Map());
 
   useEffect(() => {
     if (electronApi) {
@@ -199,9 +211,54 @@ export function App() {
     return () => window.clearInterval(timer);
   }, [electronApi]);
 
+  function maybeNotifyProjectStatusChange(
+    project: ProjectRecord,
+    previousStatus: ProjectRecord["status"] | undefined,
+  ) {
+    if (!previousStatus || previousStatus === project.status) {
+      return;
+    }
+    if (previousStatus !== "processing") {
+      return;
+    }
+    if (project.status !== "ready" && project.status !== "error") {
+      return;
+    }
+    const lastNotified = lastNotifiedProjectStatusRef.current.get(project.id);
+    if (lastNotified === project.status) {
+      return;
+    }
+    lastNotifiedProjectStatusRef.current.set(project.id, project.status);
+
+    if (project.status === "ready") {
+      enqueueSnackbar(
+        locale === "vi"
+          ? `Dự án "${project.title}" đã sẵn sàng.`
+          : `Project "${project.title}" is ready.`,
+        { variant: "success" },
+      );
+      return;
+    }
+
+    const detail = project.statusDetail?.trim() ?? "";
+    enqueueSnackbar(
+      locale === "vi"
+        ? `Dự án "${project.title}" tạo thất bại.${detail ? ` ${detail}` : ""}`
+        : `Project "${project.title}" failed.${detail ? ` ${detail}` : ""}`,
+      { variant: "error" },
+    );
+  }
+
   async function refreshProjects() {
     if (!electronApi) return;
-    const next = await electronApi.projects.list();
+    const next = await electronApi.projects.list({
+      includeArchived: includeArchivedProjects,
+    });
+    next.forEach((project) => {
+      const previousStatus = lastKnownProjectStatusRef.current.get(project.id);
+      maybeNotifyProjectStatusChange(project, previousStatus);
+      lastKnownProjectStatusRef.current.set(project.id, project.status);
+    });
     setProjects(next);
   }
 
@@ -231,6 +288,11 @@ export function App() {
   ) {
     if (!electronApi) return;
     const next = await electronApi.projects.getWorkspace(projectId);
+    const previousStatus =
+      lastKnownProjectStatusRef.current.get(next.project.id) ??
+      workspace?.project.status;
+    maybeNotifyProjectStatusChange(next.project, previousStatus);
+    lastKnownProjectStatusRef.current.set(next.project.id, next.project.status);
     setWorkspace(next);
     if (options?.resetTab || next.project.status === "error") {
       setSelectedTab("Info");
@@ -277,7 +339,12 @@ export function App() {
         );
       }
     })();
-  }, [electronApi, enqueueSnackbar]);
+  }, [electronApi, enqueueSnackbar, includeArchivedProjects]);
+
+  useEffect(() => {
+    if (!electronApi) return;
+    void refreshProjects();
+  }, [electronApi, includeArchivedProjects]);
 
   useEffect(() => {
     if (!electronApi) {
@@ -318,7 +385,7 @@ export function App() {
     return [...assets]
       .filter(
         (asset) =>
-          asset.entityType === "transcript" &&
+          (asset.entityType === "transcript" || asset.entityType === "scene") &&
           asset.kind === "audio",
       )
       .sort(
@@ -754,9 +821,13 @@ export function App() {
   }
 
   async function generateSpeechFromTranscript() {
-    if (!electronApi || !workspace) return;
+    if (!electronApi || !workspace || generatingTranscriptSpeech) return;
+    setGeneratingTranscriptSpeech(true);
+    setGeneratingTranscriptSpeechScene(null);
     try {
-      const result = await electronApi.transcript.generateSpeech(workspace.project.id);
+      const result = await electronApi.transcript.generateSpeech(workspace.project.id, {
+        speed: transcriptGenerateSpeed,
+      });
       enqueueSnackbar(
         locale === "vi"
           ? `Đã tạo giọng đọc: ${result.asset.filePath}`
@@ -771,14 +842,19 @@ export function App() {
           : t("Speech generation failed.", "Tạo giọng đọc thất bại."),
         { variant: "error" },
       );
+    } finally {
+      setGeneratingTranscriptSpeech(false);
     }
   }
 
   async function generateSpeechAllInOneFromTranscript() {
-    if (!electronApi || !workspace) return;
+    if (!electronApi || !workspace || generatingTranscriptSpeech) return;
+    setGeneratingTranscriptSpeech(true);
+    setGeneratingTranscriptSpeechScene(null);
     try {
       const result = await electronApi.transcript.generateSpeechAllInOne(
         workspace.project.id,
+        { speed: transcriptGenerateSpeed },
       );
       enqueueSnackbar(
         locale === "vi"
@@ -794,13 +870,24 @@ export function App() {
           : t("Speech generation failed.", "Tạo giọng đọc thất bại."),
         { variant: "error" },
       );
+    } finally {
+      setGeneratingTranscriptSpeech(false);
     }
   }
 
-  async function generateSpeechForScene(scene: Scene) {
-    if (!electronApi || !workspace) return;
+  async function generateSpeechForScene(
+    scene: Scene,
+    speedOverride?: number,
+  ) {
+    if (!electronApi || !workspace || generatingTranscriptSpeech) return;
+    setGeneratingTranscriptSpeech(true);
+    setGeneratingTranscriptSpeechScene(scene.sceneIndex);
     try {
-      const result = await electronApi.transcript.generateSpeechForScene(scene.id);
+      const result = await electronApi.transcript.generateSpeechForScene(scene.id, {
+        speed: Number.isFinite(speedOverride)
+          ? speedOverride
+          : transcriptGenerateSpeed,
+      });
       enqueueSnackbar(
         locale === "vi"
           ? `Đã tạo giọng đọc cho cảnh ${scene.sceneIndex}: ${result.asset.filePath}`
@@ -815,10 +902,16 @@ export function App() {
           : t("Speech generation failed.", "Tạo giọng đọc thất bại."),
         { variant: "error" },
       );
+    } finally {
+      setGeneratingTranscriptSpeech(false);
+      setGeneratingTranscriptSpeechScene(null);
     }
   }
 
-  async function generateSpeechForSceneIndex(sceneIndex: number) {
+  async function generateSpeechForSceneIndex(
+    sceneIndex: number,
+    speedOverride?: number,
+  ) {
     const scene = workspace?.scenes.find((item) => item.sceneIndex === sceneIndex);
     if (!scene) {
       enqueueSnackbar(
@@ -827,7 +920,7 @@ export function App() {
       );
       return;
     }
-    await generateSpeechForScene(scene);
+    await generateSpeechForScene(scene, speedOverride);
   }
 
   async function updateTranscriptRow(
@@ -925,6 +1018,61 @@ export function App() {
     }
   }
 
+  async function unarchiveProject(projectId: string) {
+    if (!electronApi) return;
+    await electronApi.projects.unarchive(projectId);
+    enqueueSnackbar(
+      t("Project restored.", "Đã khôi phục dự án."),
+      { variant: "success" },
+    );
+    await refreshProjects();
+  }
+
+  async function archiveProjectFromGrid(project: ProjectRecord) {
+    if (!electronApi) return;
+    const confirmed = window.confirm(
+      t(
+        `Archive "${project.title}"? You can restore it later.`,
+        `Lưu trữ "${project.title}"? Bạn có thể khôi phục sau.`,
+      ),
+    );
+    if (!confirmed) return;
+    await electronApi.projects.archive(project.id);
+    enqueueSnackbar(
+      t("Project archived.", "Đã lưu trữ dự án."),
+      { variant: "success" },
+    );
+    if (!includeArchivedProjects) {
+      setProjects((previous) => previous.filter((item) => item.id !== project.id));
+    }
+    if (workspace?.project.id === project.id) {
+      setWorkspace(null);
+    }
+    await refreshProjects();
+  }
+
+  function openCloneProjectForm(project: ProjectRecord) {
+    setProjectForm({
+      title: project.title,
+      originalContent: project.originalContent,
+      promptLanguage: project.promptLanguage,
+      transcriptLanguagePolicy: project.transcriptLanguagePolicy,
+      aspectRatio: project.aspectRatio,
+      visualStyle: project.visualStyle,
+      artDirectionHint: project.artDirectionHint,
+    });
+    setActivePage("createProject");
+  }
+
+  function closeProjectCardMenuFromEvent(
+    event: MouseEvent<any>,
+  ) {
+    const details = event.currentTarget.closest("details");
+    if (details) {
+      details.removeAttribute("open");
+    }
+  }
+
   function updateTaskMapping(
     task: GenerationTask,
     patch: Partial<TaskModelMapping>,
@@ -1018,12 +1166,6 @@ export function App() {
           </button>
         </div>
 
-        <div className="sidebar-actions">
-          <button className="btn btn-primary" onClick={handleOpenCreateProject}>
-            {t("+ New Project", "+ Dự án mới")}
-          </button>
-        </div>
-
         <div className="sidebar-bottom">
           <button
             className={`btn btn-icon ${activePage === "settings" ? "active" : ""}`}
@@ -1079,7 +1221,30 @@ export function App() {
           <section className="workspace panel workspace-projects">
             <div className="section-head">
               <h2>{t("Projects", "Dự án")}</h2>
-              <span className="pill">{projects.length}</span>
+              <div className="inline-row" style={{ gap: 8 }}>
+                <span className="pill">{projects.length}</span>
+                <button
+                  className="btn btn-primary"
+                  onClick={handleOpenCreateProject}
+                >
+                  {t("+ New Project", "+ Dự án mới")}
+                </button>
+              </div>
+            </div>
+            <div className="generation-toggle-row">
+              <span>
+                {t("🗂 Show archived", "🗂 Hiện dự án đã lưu trữ")}
+              </span>
+              <label className="switch">
+                <input
+                  type="checkbox"
+                  checked={includeArchivedProjects}
+                  onChange={(event) =>
+                    setIncludeArchivedProjects(event.target.checked)
+                  }
+                />
+                <span className="switch-slider" />
+              </label>
             </div>
             <p className="muted">
               {t(
@@ -1090,6 +1255,75 @@ export function App() {
             <div className="workspace-project-grid">
               {projects.map((project) => (
                 <div key={project.id} className="project-card-stack">
+                  <div className="project-card-context">
+                    <details className="project-card-menu">
+                      <summary
+                        className="btn project-card-menu-trigger"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          const details = event.currentTarget.parentElement;
+                          if (!details) return;
+                          details.toggleAttribute("open");
+                        }}
+                      >
+                        ⋯
+                      </summary>
+                      <div className="project-card-menu-list">
+                        <button
+                          type="button"
+                          className="btn project-card-menu-item"
+                          onMouseDown={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                          }}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            openCloneProjectForm(project);
+                            closeProjectCardMenuFromEvent(event);
+                          }}
+                        >
+                          {t("🧬 Clone", "🧬 Nhân bản")}
+                        </button>
+                        {project.archivedAt ? (
+                          <button
+                            type="button"
+                            className="btn project-card-menu-item"
+                            onMouseDown={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                            }}
+                            onClick={async (event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              await unarchiveProject(project.id);
+                              closeProjectCardMenuFromEvent(event);
+                            }}
+                          >
+                            {t("📤 Unarchive", "📤 Khôi phục")}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn project-card-menu-item"
+                            onMouseDown={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                            }}
+                            onClick={async (event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              await archiveProjectFromGrid(project);
+                              closeProjectCardMenuFromEvent(event);
+                            }}
+                          >
+                            {t("📥 Archive", "📥 Lưu trữ")}
+                          </button>
+                        )}
+                      </div>
+                    </details>
+                  </div>
                   <button
                     type="button"
                     className="project-card"
@@ -1101,6 +1335,9 @@ export function App() {
                     <p>{project.visualStyle}</p>
                     <small>
                       {project.aspectRatio} • {project.status}
+                      {project.archivedAt
+                        ? ` • ${t("Archived", "Đã lưu trữ")}`
+                        : ""}
                     </small>
                   </button>
                 </div>
@@ -1230,19 +1467,21 @@ export function App() {
               </div>
             )}
 
-            <div className="download-strip">
-              <p>
-                {selectedAssetIds.length}{" "}
-                {t("assets selected", "tài nguyên đã chọn")}
-              </p>
-              <button
-                className="btn"
-                onClick={() => void downloadSelected()}
-                disabled={selectedAssetIds.length === 0}
-              >
-                {t("Download Selected", "Tải đã chọn")}
-              </button>
-            </div>
+            {selectedTab !== "Transcript" ? (
+              <div className="download-strip">
+                <p>
+                  {selectedAssetIds.length}{" "}
+                  {t("assets selected", "tài nguyên đã chọn")}
+                </p>
+                <button
+                  className="btn"
+                  onClick={() => void downloadSelected()}
+                  disabled={selectedAssetIds.length === 0}
+                >
+                  {t("Download Selected", "Tải đã chọn")}
+                </button>
+              </div>
+            ) : null}
 
             {selectedTab === "Info" && (
               <InfoView project={workspace.project} locale={locale} />
@@ -1315,12 +1554,24 @@ export function App() {
               <TranscriptView
                 transcripts={workspace.transcripts}
                 untimedTranscript={untimedTranscript}
+                generateSpeed={transcriptGenerateSpeed}
+                onChangeGenerateSpeed={(next) =>
+                  setTranscriptGenerateSpeed(() => {
+                    if (!Number.isFinite(next)) return 1.0;
+                    return Math.min(4, Math.max(0.25, next));
+                  })
+                }
+                onCopyUntimedTranscript={() =>
+                  void copyPromptToClipboard("Transcript", untimedTranscript)
+                }
                 onExportSrt={exportSrt}
                 onGenerateSpeechSceneByScene={generateSpeechFromTranscript}
                 onGenerateSpeechAllInOne={generateSpeechAllInOneFromTranscript}
-                onGenerateSpeechForScene={(scene) =>
-                  void generateSpeechForSceneIndex(scene)
+                onGenerateSpeechForScene={(scene, speedOverride) =>
+                  void generateSpeechForSceneIndex(scene, speedOverride)
                 }
+                generatingSpeech={generatingTranscriptSpeech}
+                generatingSpeechScene={generatingTranscriptSpeechScene}
                 onUpdateRow={updateTranscriptRow}
                 onUpdateSpeakerVoice={updateSpeakerVoice}
                 speechAssets={speechAssets ?? []}

@@ -1,6 +1,9 @@
 import type { ProjectRecord } from "@shared/types";
 
-export function InfoView(props: { project: ProjectRecord; locale: "en" | "vi" }) {
+export function InfoView(props: {
+  project: ProjectRecord;
+  locale: "en" | "vi";
+}) {
   const t = (en: string, vi: string) => (props.locale === "vi" ? vi : en);
   const project = props.project;
 
@@ -53,7 +56,7 @@ export function InfoView(props: { project: ProjectRecord; locale: "en" | "vi" })
       </div>
 
       <label className="info-content">
-        {t("Content (ORIGINAL_CONTENT)", "Nội dung (ORIGINAL_CONTENT)")}
+        {t("Content", "Nội dung")}
         <textarea readOnly rows={8} value={project.originalContent} />
       </label>
     </div>

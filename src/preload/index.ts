@@ -11,10 +11,12 @@ const api: ElectronApi = {
     checkForUpdates: () => ipcRenderer.invoke('settings:checkForUpdates')
   },
   projects: {
-    list: () => ipcRenderer.invoke('projects:list'),
+    list: (options) => ipcRenderer.invoke('projects:list', options),
     create: (input) => ipcRenderer.invoke('projects:create', input),
     getWorkspace: (projectId) => ipcRenderer.invoke('projects:getWorkspace', projectId),
-    retryGenerateScript: (projectId) => ipcRenderer.invoke('projects:retryGenerateScript', projectId)
+    retryGenerateScript: (projectId) => ipcRenderer.invoke('projects:retryGenerateScript', projectId),
+    archive: (projectId) => ipcRenderer.invoke('projects:archive', projectId),
+    unarchive: (projectId) => ipcRenderer.invoke('projects:unarchive', projectId)
   },
   characters: {
     updatePrompt: (characterId, prompt) => ipcRenderer.invoke('characters:updatePrompt', characterId, prompt),
@@ -33,9 +35,11 @@ const api: ElectronApi = {
   transcript: {
     untimedText: (projectId) => ipcRenderer.invoke('transcript:untimedText', projectId),
     exportSrt: (projectId) => ipcRenderer.invoke('transcript:exportSrt', projectId),
-    generateSpeech: (projectId) => ipcRenderer.invoke('transcript:generateSpeech', projectId),
-    generateSpeechAllInOne: (projectId) => ipcRenderer.invoke('transcript:generateSpeechAllInOne', projectId),
-    generateSpeechForScene: (sceneId) => ipcRenderer.invoke('transcript:generateSpeechForScene', sceneId),
+    generateSpeech: (projectId, options) => ipcRenderer.invoke('transcript:generateSpeech', projectId, options),
+    generateSpeechAllInOne: (projectId, options) =>
+      ipcRenderer.invoke('transcript:generateSpeechAllInOne', projectId, options),
+    generateSpeechForScene: (sceneId, options) =>
+      ipcRenderer.invoke('transcript:generateSpeechForScene', sceneId, options),
     updateRow: (transcriptId, patch) => ipcRenderer.invoke('transcript:updateRow', transcriptId, patch),
     updateSpeakerVoice: (projectId, speaker, voiceId) =>
       ipcRenderer.invoke('transcript:updateSpeakerVoice', projectId, speaker, voiceId)

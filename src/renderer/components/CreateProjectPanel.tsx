@@ -77,7 +77,7 @@ export function CreateProjectPanel(props: {
         />
       </label>
       <label>
-        {t("Content (ORIGINAL_CONTENT)", "Nội dung (ORIGINAL_CONTENT)")}
+        {t("Content", "Nội dung")}
         <textarea
           value={props.projectForm.originalContent}
           rows={8}
@@ -97,7 +97,8 @@ export function CreateProjectPanel(props: {
             onChange={(event) =>
               props.setProjectForm({
                 ...props.projectForm,
-                promptLanguage: event.target.value as ProjectInput["promptLanguage"],
+                promptLanguage: event.target
+                  .value as ProjectInput["promptLanguage"],
               })
             }
           >
@@ -113,8 +114,8 @@ export function CreateProjectPanel(props: {
             onChange={(event) =>
               props.setProjectForm({
                 ...props.projectForm,
-                transcriptLanguagePolicy:
-                  event.target.value as ProjectInput["transcriptLanguagePolicy"],
+                transcriptLanguagePolicy: event.target
+                  .value as ProjectInput["transcriptLanguagePolicy"],
               })
             }
           >
@@ -156,7 +157,9 @@ export function CreateProjectPanel(props: {
                 key={preset.value}
                 type="button"
                 className={`aspect-ratio-preview${
-                  props.projectForm.aspectRatio === preset.value ? " active" : ""
+                  props.projectForm.aspectRatio === preset.value
+                    ? " active"
+                    : ""
                 }`}
                 onClick={() =>
                   props.setProjectForm({
@@ -165,7 +168,9 @@ export function CreateProjectPanel(props: {
                   })
                 }
               >
-                <span className="aspect-ratio-preview-label">{preset.value}</span>
+                <span className="aspect-ratio-preview-label">
+                  {preset.value}
+                </span>
                 <span className="aspect-ratio-preview-box-wrap">
                   <span
                     className="aspect-ratio-preview-box"
@@ -222,7 +227,8 @@ export function CreateProjectPanel(props: {
                 backgroundImage: `url(${visualStyleGridImage})`,
                 backgroundPosition:
                   visualStylePreviewPositions[
-                    props.projectForm.visualStyle as (typeof visualStyleOptions)[number]
+                    props.projectForm
+                      .visualStyle as (typeof visualStyleOptions)[number]
                   ] ?? "50% 50%",
               }}
             />
@@ -241,7 +247,9 @@ export function CreateProjectPanel(props: {
           className="btn btn-primary"
           onClick={props.onCreate}
           disabled={
-            props.busy || !props.projectForm.title || !props.projectForm.originalContent
+            props.busy ||
+            !props.projectForm.title ||
+            !props.projectForm.originalContent
           }
         >
           {t("Create", "Tạo")}

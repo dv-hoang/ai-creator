@@ -86,6 +86,7 @@ function normalizeProjectRecord(project: ProjectRecord): ProjectRecord {
   return {
     ...project,
     statusDetail: normalizedStatusDetail,
+    archivedAt: project.archivedAt ?? null,
   };
 }
 
@@ -534,6 +535,7 @@ export function createProject(input: ProjectInput): ProjectRecord {
     id: randomUUID(),
     status: "processing",
     statusDetail: null,
+    archivedAt: null,
     createdAt: nowIso(),
     updatedAt: nowIso(),
     ...input,
@@ -568,8 +570,14 @@ export function updateProjectStatus(
   saveData();
 }
 
-export function listProjects(): ProjectRecord[] {
-  return [...loadData().projects].sort((a, b) =>
+export function listProjects(options?: {
+  includeArchived?: boolean;
+}): ProjectRecord[] {
+  const includeArchived = Boolean(options?.includeArchived);
+  const items = includeArchived
+    ? loadData().projects
+    : loadData().projects.filter((project) => !project.archivedAt);
+  return [...items].sort((a, b) =>
     a.createdAt < b.createdAt ? 1 : -1,
   );
 }
@@ -580,6 +588,34 @@ export function getProject(projectId: string): ProjectRecord {
     throw new Error("Project not found");
   }
   return project;
+}
+
+export function archiveProject(projectId: string): ProjectRecord {
+  const data = loadData();
+  const project = data.projects.find((item) => item.id === projectId);
+  if (!project) {
+    throw new Error("Project not found");
+  }
+  if (!project.archivedAt) {
+    project.archivedAt = nowIso();
+    project.updatedAt = nowIso();
+    saveData();
+  }
+  return normalizeProjectRecord(project);
+}
+
+export function unarchiveProject(projectId: string): ProjectRecord {
+  const data = loadData();
+  const project = data.projects.find((item) => item.id === projectId);
+  if (!project) {
+    throw new Error("Project not found");
+  }
+  if (project.archivedAt) {
+    project.archivedAt = null;
+    project.updatedAt = nowIso();
+    saveData();
+  }
+  return normalizeProjectRecord(project);
 }
 
 /** Clears step-1 outputs, characters, scenes, transcripts, and assets for a clean regeneration run. */

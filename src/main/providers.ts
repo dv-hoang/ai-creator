@@ -866,17 +866,19 @@ async function elevenLabsGenerateSpeech(
   text: string,
   apiKey: string,
   outputPathWithoutExt: string,
-  voiceId: string
+  voiceId: string,
+  voiceSettings?: { speed?: number }
 ): Promise<{ filePath: string; metadata: Record<string, unknown> }> {
   const bytes = await synthesizeElevenLabsAudioBuffer({
     model,
     text,
     apiKey,
-    voiceId
+    voiceId,
+    voiceSettings
   });
   const filePath = `${outputPathWithoutExt}.mp3`;
   writeFileSync(filePath, bytes);
-  return { filePath, metadata: { voiceId } };
+  return { filePath, metadata: { voiceId, voiceSettings } };
 }
 
 function looksLikeElevenLabsModelId(value: string): boolean {
@@ -966,11 +968,13 @@ async function synthesizeElevenLabsAudioBuffer(options: {
   text: string;
   apiKey: string;
   voiceId: string;
+  voiceSettings?: { speed?: number };
 }): Promise<Buffer> {
   const client = getElevenLabsClient(options.apiKey);
   const audio = await client.textToSpeech.convert(options.voiceId, {
     text: options.text,
-    modelId: options.model
+    modelId: options.model,
+    ...(options.voiceSettings ? { voiceSettings: options.voiceSettings } : {})
   });
   return toBuffer(audio);
 }
@@ -980,6 +984,7 @@ export async function synthesizeElevenLabsSpeechPreview(options: {
   text: string;
   apiKey: string;
   voiceId: string;
+  voiceSettings?: { speed?: number };
 }): Promise<string> {
   const defaultVoiceId = 'EXAVITQu4vr4xnSDxMaL';
   const primaryVoiceId = normalizeElevenLabsVoiceId(options.voiceId, defaultVoiceId);
@@ -998,7 +1003,8 @@ export async function synthesizeElevenLabsSpeechPreview(options: {
       model: options.model,
       text: options.text,
       apiKey: options.apiKey,
-      voiceId: resolvedVoiceId
+      voiceId: resolvedVoiceId,
+      voiceSettings: options.voiceSettings
     });
   } catch (error) {
     if (isInvalidVoiceError(error)) {
@@ -1007,7 +1013,8 @@ export async function synthesizeElevenLabsSpeechPreview(options: {
           model: options.model,
           text: options.text,
           apiKey: options.apiKey,
-          voiceId: defaultVoiceId
+          voiceId: defaultVoiceId,
+          voiceSettings: options.voiceSettings
         });
       } catch (defaultError) {
         if (!isInvalidVoiceError(defaultError)) {
@@ -1028,7 +1035,8 @@ export async function synthesizeElevenLabsSpeechPreview(options: {
           model: options.model,
           text: options.text,
           apiKey: options.apiKey,
-          voiceId: fallbackVoiceId
+          voiceId: fallbackVoiceId,
+          voiceSettings: options.voiceSettings
         });
       }
     } else {
@@ -1045,6 +1053,7 @@ export async function generateSpeech(options: {
   projectId: string;
   text: string;
   segments?: Array<{ text: string; voiceId?: string }>;
+  voiceSettings?: { speed?: number };
 }): Promise<{ provider: ProviderName; model: string; filePath: string; metadataJson: string }> {
   const settings = getSettings();
   const mapping = resolveTask('textToSpeech', settings);
@@ -1070,7 +1079,8 @@ export async function generateSpeech(options: {
         model: mapping.model,
         text: segmentText,
         apiKey: key,
-        voiceId
+        voiceId,
+        voiceSettings: options.voiceSettings
       });
       const base64 = preview.replace(/^data:audio\/mpeg;base64,/, '');
       chunks.push(Buffer.from(base64, 'base64'));
@@ -1089,7 +1099,14 @@ export async function generateSpeech(options: {
       }
     };
   } else {
-    generated = await elevenLabsGenerateSpeech(mapping.model, options.text, key, outputPathWithoutExt, defaultVoiceId);
+    generated = await elevenLabsGenerateSpeech(
+      mapping.model,
+      options.text,
+      key,
+      outputPathWithoutExt,
+      defaultVoiceId,
+      options.voiceSettings
+    );
   }
 
   return {
