@@ -24,9 +24,10 @@
 - IPC channels cover:
   - settings management + provider model discovery
   - project creation + workspace retrieval + regeneration
+  - project archive/unarchive + archived filtering
   - character/scene prompt updates
   - image/video generation
-  - transcript utilities
+  - transcript utilities + speech generation controls
   - app update checks and external URL opening
 - Storage is local JSON with per-project files and encrypted API keys.
 - Provider integration supports OpenAI + Gemini text/image/video flows.
@@ -44,7 +45,9 @@
 - Workspace supports:
   - character and scene prompt refinement
   - generation actions and asset management
-  - transcript export helpers
+  - transcript export helpers + speech generation playback
+  - project context actions (clone/archive/unarchive)
+  - archived project visibility toggle
 
 ## Shared Domain Types
 
@@ -65,7 +68,17 @@
 
 ## Current Focus Areas (from recent changes)
 
-- Stable dev startup/loading for renderer.
-- Local asset loading compatibility via custom protocol.
-- Improved Create Project UX (visual styles, preview layout, generation controls).
-- Packaging asset quality (icons + transparency handling).
+- Transcript workflow improvements:
+  - global/per-scene speech speed control
+  - autosave transcript text edits
+  - latest-file playback behavior for scene/all-in-one speech
+  - simplified transcript controls and reduced UI density
+- Workspace project lifecycle improvements:
+  - archive/unarchive persistence and filtering
+  - clone project from card context menu
+  - status change toasts for processing lifecycle
+- Updater improvements:
+  - install/update from latest GitHub release via platform-aware asset picking
+- Prompt quality safeguards:
+  - language rules explicitly enforced in animation template
+  - regression tests for template language requirements

@@ -88,7 +88,7 @@ export function TranscriptView(props: {
     });
     return map;
   }, [props.speechAssets]);
-  const latestAllInOneSpeechAsset = useMemo(() => {
+  const latestAllInOneSpeechAsset = useMemo<AssetRecord | null>(() => {
     let latest: AssetRecord | null = null;
     props.speechAssets.forEach((asset) => {
       try {
@@ -387,35 +387,37 @@ export function TranscriptView(props: {
           );
         })}
       </div>
-      {latestAllInOneSpeechAsset && (
-        <div className="panel-subtle p-2" style={{ marginTop: 12 }}>
-          <strong>
-            {t("All in one speech", "Giọng đọc tất cả trong một")}
-          </strong>
-          <div className="table-like" style={{ marginTop: 8 }}>
-            <div key={latestAllInOneSpeechAsset.id} className="table-row">
-              <span>{t("Latest full transcript", "Bản toàn bộ mới nhất")}</span>
-              <audio
-                controls
-                preload="metadata"
-                src={props.toRenderableSrc(latestAllInOneSpeechAsset.filePath)}
-                style={{ width: "100%" }}
-              />
-              <button
-                className="btn btn-icon"
-                type="button"
-                onClick={() =>
-                  props.onDownloadSpeech(latestAllInOneSpeechAsset.id)
-                }
-                aria-label={t("Download speech", "Tải giọng đọc")}
-                title={t("Download speech", "Tải giọng đọc")}
-              >
-                ⬇
-              </button>
+      {(() => {
+        const latest = latestAllInOneSpeechAsset;
+        if (!latest) return null;
+        return (
+          <div className="panel-subtle p-2" style={{ marginTop: 12 }}>
+            <strong>
+              {t("All in one speech", "Giọng đọc tất cả trong một")}
+            </strong>
+            <div className="table-like" style={{ marginTop: 8 }}>
+              <div key={latest.id} className="table-row">
+                <span>{t("Latest full transcript", "Bản toàn bộ mới nhất")}</span>
+                <audio
+                  controls
+                  preload="metadata"
+                  src={props.toRenderableSrc(latest.filePath)}
+                  style={{ width: "100%" }}
+                />
+                <button
+                  className="btn btn-icon"
+                  type="button"
+                  onClick={() => props.onDownloadSpeech(latest.id)}
+                  aria-label={t("Download speech", "Tải giọng đọc")}
+                  title={t("Download speech", "Tải giọng đọc")}
+                >
+                  ⬇
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

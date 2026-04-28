@@ -2,7 +2,7 @@
 
 ## Current Version Theme
 
-Stabilize core generation workflow and improve creator UX for style-guided project setup.
+Stabilize generation workflows and improve day-to-day creator operations in workspace/transcript.
 
 ## Phase 1 — Reliability Baseline (Completed/In Progress)
 
@@ -12,22 +12,28 @@ Stabilize core generation workflow and improve creator UX for style-guided proje
 - [x] Add generation feature toggles in settings.
 - [x] Improve create-project visual style selection + preview UX.
 
-## Phase 2 — Workflow Quality (Next)
+## Phase 2 — Workflow Quality (Completed/In Progress)
 
-- [ ] Add stronger job-status visibility (progress states per generation task).
-- [ ] Add retry UX for failed image/video tasks with clearer errors.
-- [ ] Add regression tests for project creation + generation toggle visibility.
-- [ ] Improve prompt override diff visibility vs default prompts.
+- [x] Add project status change notifications (processing -> ready/error).
+- [x] Add retry UX for failed script generation with clearer status messaging.
+- [x] Add transcript speech generation speed controls (global + per scene override).
+- [x] Improve transcript editing UX (hover-copy untimed transcript, autosave edits, cleaner controls).
+- [x] Ensure transcript playback loads latest generated speech for scenes/all-in-one.
+- [x] Add regression tests for prompt language rules in animation template.
 
 ## Phase 3 — Content Pipeline Scaling
 
+- [x] Add project archive/unarchive lifecycle and persistence (`archivedAt`).
+- [x] Add workspace filtering for archived projects.
+- [x] Add project-card context menu actions (archive/unarchive/clone).
 - [ ] Introduce durable generation job queue abstraction.
 - [ ] Add batch generation modes (multi-scene image/video).
 - [ ] Add richer asset metadata filters and search in workspace.
-- [ ] Add transcript editing utilities with timing assist.
+- [ ] Add transcript timing-assist utilities (timed editing helpers).
 
-## Phase 4 — Distribution + Platform
+## Phase 4 — Distribution + Platform (In Progress)
 
+- [x] Add update-from-latest-release flow with platform-aware asset selection.
 - [ ] Improve CI release automation for mac artifact pipelines.
 - [ ] Add Windows packaging support path.
 - [ ] Add Linux packaging support path.

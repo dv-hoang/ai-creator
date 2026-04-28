@@ -18,7 +18,7 @@ AI Creator uses Electron with a strict split between:
 - `providers.ts`: AI provider integrations (OpenAI, Gemini), generation and validation.
 - `template.ts`: prompt composition utilities.
 - `transcript.ts`: transcript transformations and SRT export.
-- `update.ts`: GitHub release update check.
+- `update.ts`: GitHub release update check + install flow from latest release assets.
 
 ### Renderer (`src/renderer`)
 
@@ -41,11 +41,26 @@ AI Creator uses Electron with a strict split between:
 4. Main returns normalized payload back to renderer.
 5. Renderer updates local UI state.
 
+## IPC Contract Highlights
+
+- **Project lifecycle**
+  - `projects:list(options)` supports archived filtering (`includeArchived`).
+  - `projects:archive(projectId)` / `projects:unarchive(projectId)` manage project archival state.
+- **Transcript speech**
+  - `transcript:generateSpeech(projectId, options)`
+  - `transcript:generateSpeechAllInOne(projectId, options)`
+  - `transcript:generateSpeechForScene(sceneId, options)`
+  - `options.speed` is passed through to provider voice settings.
+- **Updater**
+  - `app:updateFromLatestRelease(repo?)` installs updates by selecting the best release asset for the running platform.
+
 ## Persistence Model
 
 - Base app data: `data/ai-creator.json`
 - Per-project data: `data/projects/<projectId>/project-data.json`
 - Generated project assets: project-specific asset directory from DB helpers.
+- Project archival state:
+  - `ProjectRecord.archivedAt` (nullable ISO timestamp) controls active vs archived visibility.
 - Secrets:
   - provider keys are encrypted before persistence
   - AES-256-GCM with local key in `data/secret.key`
@@ -68,6 +83,10 @@ AI Creator uses Electron with a strict split between:
 - Scene image generation from active scene prompt + constraints.
 - Scene video generation from selected first-frame image + video prompt.
 - Assets persisted with metadata and provider/model provenance.
+- Transcript speech assets are persisted as project assets with metadata for:
+  - scene-level generation
+  - all-in-one generation
+  - latest-first playback behavior in renderer
 
 ## Security Boundaries
 
