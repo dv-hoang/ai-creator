@@ -890,6 +890,41 @@ export function App() {
     }
   }
 
+  async function handleUpdateFromLatestRelease() {
+    if (!electronApi) return;
+    setBusy(true);
+    try {
+      const result = await electronApi.app.updateFromLatestRelease(
+        latestUpdate?.repo,
+      );
+      setShowUpdateAvailableModal(false);
+      enqueueSnackbar(
+        locale === "vi"
+          ? `Đã tải ${result.assetName} (${result.latestVersion}) về ${result.downloadPath}.`
+          : `Downloaded ${result.assetName} (${result.latestVersion}) to ${result.downloadPath}.`,
+        { variant: "success" },
+      );
+      if (!result.opened) {
+        enqueueSnackbar(
+          t(
+            "Installer could not be opened automatically. Please open the downloaded file manually.",
+            "Không thể tự mở bộ cài. Vui lòng mở file đã tải thủ công.",
+          ),
+          { variant: "warning" },
+        );
+      }
+    } catch (error) {
+      enqueueSnackbar(
+        error instanceof Error
+          ? error.message
+          : t("Update failed.", "Cập nhật thất bại."),
+        { variant: "error" },
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function updateTaskMapping(
     task: GenerationTask,
     patch: Partial<TaskModelMapping>,
@@ -1100,8 +1135,8 @@ export function App() {
               </div>
               <p className="muted">
                 {t(
-                  "A newer version is available. Download it from the release page.",
-                  "Đã có phiên bản mới. Tải xuống từ trang release.",
+                  "A newer version is available. You can auto-download the installer or open the release page.",
+                  "Đã có phiên bản mới. Bạn có thể tự động tải bộ cài hoặc mở trang release.",
                 )}
               </p>
               <p>
@@ -1122,6 +1157,14 @@ export function App() {
                 <button
                   type="button"
                   className="btn btn-primary"
+                  onClick={() => void handleUpdateFromLatestRelease()}
+                  disabled={busy}
+                >
+                  {t("Update now", "Cập nhật ngay")}
+                </button>
+                <button
+                  type="button"
+                  className="btn"
                   onClick={() => void handleOpenLatestRelease()}
                 >
                   {t("Open release page", "Mở trang release")}

@@ -147,6 +147,13 @@ export interface UpdateCheckResult {
   repo: string;
 }
 
+export interface UpdateInstallResult {
+  latestVersion: string;
+  assetName: string;
+  downloadPath: string;
+  opened: boolean;
+}
+
 export interface ElectronApi {
   settings: {
     get(): Promise<AppSettings>;
@@ -201,5 +208,6 @@ export interface ElectronApi {
   app: {
     getVersion(): Promise<string>;
     openExternal(url: string): Promise<boolean>;
+    updateFromLatestRelease(repo?: string): Promise<UpdateInstallResult>;
   };
 }

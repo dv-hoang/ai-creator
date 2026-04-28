@@ -51,7 +51,7 @@ import {
 } from './providers';
 import { buildUntimedTranscript, exportSrt } from './transcript';
 import { renderAnimationPrompt } from './template';
-import { checkGithubReleaseUpdate } from './update';
+import { checkGithubReleaseUpdate, updateAppFromLatestRelease } from './update';
 
 const DEFAULT_RELEASE_REPO = 'https://github.com/dv-hoang/ai-creator';
 
@@ -364,6 +364,9 @@ export function registerIpc(): void {
     }
     await shell.openExternal(url);
     return true;
+  });
+  bind('app:updateFromLatestRelease', async (repo?: string) => {
+    return updateAppFromLatestRelease(repo || DEFAULT_RELEASE_REPO);
   });
 
   bind('projects:list', () => listProjects());

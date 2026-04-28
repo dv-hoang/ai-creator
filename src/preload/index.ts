@@ -42,7 +42,9 @@ const api: ElectronApi = {
   },
   app: {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
-    openExternal: (url) => ipcRenderer.invoke('app:openExternal', url)
+    openExternal: (url) => ipcRenderer.invoke('app:openExternal', url),
+    updateFromLatestRelease: (repo?: string) =>
+      ipcRenderer.invoke('app:updateFromLatestRelease', repo)
   }
 };
 
