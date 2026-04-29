@@ -18,6 +18,12 @@ const api: ElectronApi = {
     archive: (projectId) => ipcRenderer.invoke('projects:archive', projectId),
     unarchive: (projectId) => ipcRenderer.invoke('projects:unarchive', projectId)
   },
+  globalCharacters: {
+    listGallery: () => ipcRenderer.invoke('globalCharacters:listGallery'),
+    uploadLibraryImage: () => ipcRenderer.invoke('globalCharacters:uploadLibraryImage'),
+    applyMapping: (characterId, payload) =>
+      ipcRenderer.invoke('globalCharacters:applyMapping', characterId, payload)
+  },
   characters: {
     updatePrompt: (characterId, prompt) => ipcRenderer.invoke('characters:updatePrompt', characterId, prompt),
     linkAsset: (characterId, assetId) => ipcRenderer.invoke('characters:linkAsset', characterId, assetId),

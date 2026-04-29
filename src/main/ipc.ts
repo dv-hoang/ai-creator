@@ -6,6 +6,8 @@ import type {
   AppSettings,
   Character,
   GenerationTask,
+  GlobalCharacterApplySource,
+  GlobalLibraryImage,
   ProjectInput,
   ProjectRecord,
   ProviderName,
@@ -40,9 +42,15 @@ import {
   updateTranscriptVoiceBySpeaker,
   updateCharacterPrompt,
   updateProjectStatus,
-  updateScenePrompts
+  updateScenePrompts,
+  getGlobalLibraryImageById,
+  listGlobalCharacterGallery,
+  resolveGlobalLibraryDir,
+  upsertGlobalLibraryImage
 } from './db';
 import {
+  compressCopyImageForCharacterMapping,
+  compressImageToLibraryWebp,
   generateImage,
   generateSpeech,
   generateStep1,
@@ -393,6 +401,82 @@ export function registerIpc(): void {
   });
   bind('projects:archive', (projectId: string) => archiveProject(projectId));
   bind('projects:unarchive', (projectId: string) => unarchiveProject(projectId));
+
+  bind('globalCharacters:listGallery', () => listGlobalCharacterGallery());
+
+  bind('globalCharacters:uploadLibraryImage', async (): Promise<GlobalLibraryImage | null> => {
+    const selection = await dialog.showOpenDialog({
+      title: 'Add image to Characters library',
+      properties: ['openFile'],
+      filters: [
+        {
+          name: 'Images',
+          extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp']
+        }
+      ]
+    });
+    if (selection.canceled || selection.filePaths.length === 0) {
+      return null;
+    }
+    const sourcePath = selection.filePaths[0];
+    const id = randomUUID();
+    const outPath = join(resolveGlobalLibraryDir(), `${id}.webp`);
+    const { filePath, metadata } = await compressImageToLibraryWebp(sourcePath, outPath);
+    void metadata;
+    const originalFileName = basename(sourcePath);
+    const record: GlobalLibraryImage = {
+      id,
+      filePath,
+      originalFileName,
+      createdAt: new Date().toISOString()
+    };
+    upsertGlobalLibraryImage(record);
+    return record;
+  });
+
+  bind(
+    'globalCharacters:applyMapping',
+    async (characterId: string, payload: GlobalCharacterApplySource) => {
+      const character = getCharacter(characterId);
+      const sourcePath =
+        payload.source === 'asset'
+          ? getAsset(payload.assetId).filePath
+          : (() => {
+              const lib = getGlobalLibraryImageById(payload.libraryId);
+              if (!lib) {
+                throw new Error('Library character image was not found');
+              }
+              return lib.filePath;
+            })();
+      const projectAssetsDir = getProjectAssetsDir(character.projectId);
+      const generated = await compressCopyImageForCharacterMapping(
+        sourcePath,
+        projectAssetsDir,
+        randomUUID()
+      );
+      const meta = {
+        ...generated.metadata,
+        mapSource:
+          payload.source === 'asset'
+            ? { type: 'asset', assetId: payload.assetId }
+            : { type: 'library', libraryId: payload.libraryId }
+      };
+
+      const asset = saveAsset({
+        projectId: character.projectId,
+        entityType: 'character',
+        entityId: character.id,
+        kind: 'image',
+        filePath: generated.filePath,
+        provider: 'fal',
+        model: 'import-map',
+        metadataJson: JSON.stringify(meta)
+      });
+
+      linkCharacterAsset(character.id, asset.id);
+      return { jobId: randomUUID(), asset };
+    }
+  );
 
   bind('characters:updatePrompt', (characterId: string, prompt: string) => updateCharacterPrompt(characterId, prompt));
   bind('characters:linkAsset', (characterId: string, assetId: string) => linkCharacterAsset(characterId, assetId));

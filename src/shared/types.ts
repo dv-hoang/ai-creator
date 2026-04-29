@@ -43,6 +43,11 @@ export interface ProjectRecord extends ProjectInput {
   updatedAt: string;
 }
 
+/** `projects:list` attaches the earliest generated image path (never persisted on disk). */
+export type ProjectWithThumbnail = ProjectRecord & {
+  thumbnailFilePath: string | null;
+};
+
 export interface Character {
   id: string;
   projectId: string;
@@ -135,6 +140,41 @@ export interface GenerationResult {
   asset: AssetRecord;
 }
 
+/** App-wide uploads shown in Characters gallery (distinct from project assets). */
+export interface GlobalLibraryImage {
+  id: string;
+  filePath: string;
+  originalFileName: string;
+  createdAt: string;
+}
+
+export type GlobalCharacterGalleryItem =
+  | {
+      tileId: string;
+      source: 'project';
+      assetId: string;
+      projectId: string;
+      projectTitle: string;
+      characterId: string;
+      characterName: string;
+      filePath: string;
+      createdAt: string;
+      provider: ProviderName;
+      model: string;
+    }
+  | {
+      tileId: string;
+      source: 'library';
+      libraryId: string;
+      filePath: string;
+      createdAt: string;
+      originalFileName: string;
+    };
+
+export type GlobalCharacterApplySource =
+  | { source: 'asset'; assetId: string }
+  | { source: 'library'; libraryId: string };
+
 export interface ValidateProviderResult {
   ok: boolean;
   message: string;
@@ -165,12 +205,17 @@ export interface ElectronApi {
     checkForUpdates(): Promise<UpdateCheckResult>;
   };
   projects: {
-    list(options?: { includeArchived?: boolean }): Promise<ProjectRecord[]>;
+    list(options?: { includeArchived?: boolean }): Promise<ProjectWithThumbnail[]>;
     create(input: ProjectInput): Promise<ProjectWorkspace>;
     getWorkspace(projectId: string): Promise<ProjectWorkspace>;
     retryGenerateScript(projectId: string): Promise<ProjectWorkspace>;
     archive(projectId: string): Promise<ProjectRecord>;
     unarchive(projectId: string): Promise<ProjectRecord>;
+  };
+  globalCharacters: {
+    listGallery(): Promise<GlobalCharacterGalleryItem[]>;
+    uploadLibraryImage(): Promise<GlobalLibraryImage | null>;
+    applyMapping(characterId: string, payload: GlobalCharacterApplySource): Promise<GenerationResult>;
   };
   characters: {
     updatePrompt(characterId: string, prompt: string): Promise<Character>;

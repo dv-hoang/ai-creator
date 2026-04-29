@@ -8,12 +8,14 @@ import type {
   ProviderName,
   ProjectInput,
   ProjectRecord,
+  ProjectWithThumbnail,
   ProjectWorkspace,
   Scene,
   TaskModelMapping,
   UpdateCheckResult,
 } from "@shared/types";
 import { CharactersView } from "./components/CharactersView";
+import { GlobalCharactersView } from "./components/GlobalCharactersView";
 import { CreateProjectPanel } from "./components/CreateProjectPanel";
 import { InfoView } from "./components/InfoView";
 import { ScenesView } from "./components/ScenesView";
@@ -115,12 +117,12 @@ export function App() {
     typeof window.electronApi | null
   >(window.electronApi ?? null);
   const [activePage, setActivePage] = useState<
-    "workspace" | "settings" | "createProject"
+    "workspace" | "characters" | "settings" | "createProject"
   >("workspace");
   const [settingsTab, setSettingsTab] = useState<
     "general" | "providers" | "controls"
   >("general");
-  const [projects, setProjects] = useState<ProjectRecord[]>([]);
+  const [projects, setProjects] = useState<ProjectWithThumbnail[]>([]);
   const [includeArchivedProjects, setIncludeArchivedProjects] = useState(false);
   const [workspace, setWorkspace] = useState<ProjectWorkspace | null>(null);
   const [assets, setAssets] = useState<AssetRecord[]>([]);
@@ -465,10 +467,9 @@ export function App() {
       );
       const audio = new window.Audio(audioDataUrl);
       await audio.play();
-      enqueueSnackbar(
-        t("Playing voice preview.", "Đang phát thử giọng nói."),
-        { variant: "success" },
-      );
+      enqueueSnackbar(t("Playing voice preview.", "Đang phát thử giọng nói."), {
+        variant: "success",
+      });
     } catch (error) {
       enqueueSnackbar(
         error instanceof Error
@@ -825,9 +826,12 @@ export function App() {
     setGeneratingTranscriptSpeech(true);
     setGeneratingTranscriptSpeechScene(null);
     try {
-      const result = await electronApi.transcript.generateSpeech(workspace.project.id, {
-        speed: transcriptGenerateSpeed,
-      });
+      const result = await electronApi.transcript.generateSpeech(
+        workspace.project.id,
+        {
+          speed: transcriptGenerateSpeed,
+        },
+      );
       enqueueSnackbar(
         locale === "vi"
           ? `Đã tạo giọng đọc: ${result.asset.filePath}`
@@ -875,19 +879,19 @@ export function App() {
     }
   }
 
-  async function generateSpeechForScene(
-    scene: Scene,
-    speedOverride?: number,
-  ) {
+  async function generateSpeechForScene(scene: Scene, speedOverride?: number) {
     if (!electronApi || !workspace || generatingTranscriptSpeech) return;
     setGeneratingTranscriptSpeech(true);
     setGeneratingTranscriptSpeechScene(scene.sceneIndex);
     try {
-      const result = await electronApi.transcript.generateSpeechForScene(scene.id, {
-        speed: Number.isFinite(speedOverride)
-          ? speedOverride
-          : transcriptGenerateSpeed,
-      });
+      const result = await electronApi.transcript.generateSpeechForScene(
+        scene.id,
+        {
+          speed: Number.isFinite(speedOverride)
+            ? speedOverride
+            : transcriptGenerateSpeed,
+        },
+      );
       enqueueSnackbar(
         locale === "vi"
           ? `Đã tạo giọng đọc cho cảnh ${scene.sceneIndex}: ${result.asset.filePath}`
@@ -912,12 +916,13 @@ export function App() {
     sceneIndex: number,
     speedOverride?: number,
   ) {
-    const scene = workspace?.scenes.find((item) => item.sceneIndex === sceneIndex);
+    const scene = workspace?.scenes.find(
+      (item) => item.sceneIndex === sceneIndex,
+    );
     if (!scene) {
-      enqueueSnackbar(
-        t("Scene not found.", "Không tìm thấy cảnh."),
-        { variant: "error" },
-      );
+      enqueueSnackbar(t("Scene not found.", "Không tìm thấy cảnh."), {
+        variant: "error",
+      });
       return;
     }
     await generateSpeechForScene(scene, speedOverride);
@@ -936,10 +941,9 @@ export function App() {
     if (!electronApi || !workspace) return;
     await electronApi.transcript.updateRow(transcriptId, patch);
     await refreshWorkspace(workspace.project.id);
-    enqueueSnackbar(
-      t("Transcript updated.", "Đã cập nhật lời thoại."),
-      { variant: "success" },
-    );
+    enqueueSnackbar(t("Transcript updated.", "Đã cập nhật lời thoại."), {
+      variant: "success",
+    });
   }
 
   async function updateSpeakerVoice(speaker: string, voiceId: string) {
@@ -1021,10 +1025,9 @@ export function App() {
   async function unarchiveProject(projectId: string) {
     if (!electronApi) return;
     await electronApi.projects.unarchive(projectId);
-    enqueueSnackbar(
-      t("Project restored.", "Đã khôi phục dự án."),
-      { variant: "success" },
-    );
+    enqueueSnackbar(t("Project restored.", "Đã khôi phục dự án."), {
+      variant: "success",
+    });
     await refreshProjects();
   }
 
@@ -1038,12 +1041,13 @@ export function App() {
     );
     if (!confirmed) return;
     await electronApi.projects.archive(project.id);
-    enqueueSnackbar(
-      t("Project archived.", "Đã lưu trữ dự án."),
-      { variant: "success" },
-    );
+    enqueueSnackbar(t("Project archived.", "Đã lưu trữ dự án."), {
+      variant: "success",
+    });
     if (!includeArchivedProjects) {
-      setProjects((previous) => previous.filter((item) => item.id !== project.id));
+      setProjects((previous) =>
+        previous.filter((item) => item.id !== project.id),
+      );
     }
     if (workspace?.project.id === project.id) {
       setWorkspace(null);
@@ -1064,9 +1068,7 @@ export function App() {
     setActivePage("createProject");
   }
 
-  function closeProjectCardMenuFromEvent(
-    event: MouseEvent<any>,
-  ) {
+  function closeProjectCardMenuFromEvent(event: MouseEvent<any>) {
     const details = event.currentTarget.closest("details");
     if (details) {
       details.removeAttribute("open");
@@ -1164,6 +1166,12 @@ export function App() {
           >
             {t("Workspace", "Không gian làm việc")}
           </button>
+          <button
+            className={`btn ${activePage === "characters" ? "active" : ""}`}
+            onClick={() => setActivePage("characters")}
+          >
+            {t("Characters", "Nhân vật")}
+          </button>
         </div>
 
         <div className="sidebar-bottom">
@@ -1179,6 +1187,17 @@ export function App() {
       </aside>
 
       <main className="content">
+        {activePage === "characters" && (
+          <GlobalCharactersView
+            locale={locale}
+            toRenderableSrc={toRenderableSrc}
+            busy={busy}
+            setBusy={setBusy}
+            electronApi={electronApi}
+            onOpenLightbox={(src, alt) => setLightboxImage({ src, alt })}
+          />
+        )}
+
         {activePage === "settings" && (
           <SettingsPanel
             locale={locale}
@@ -1190,7 +1209,9 @@ export function App() {
             onSaveSettings={handleSaveSettings}
             onTestVoice={(sampleText) => void handleTestVoice(sampleText)}
             onRetryLoad={() => void refreshSettings()}
-            onValidateProvider={(provider) => void handleValidateProvider(provider)}
+            onValidateProvider={(provider) =>
+              void handleValidateProvider(provider)
+            }
             onProviderApiKeyChange={handleProviderApiKeyChange}
             onDuplicateProvider={() =>
               enqueueSnackbar(
@@ -1232,9 +1253,7 @@ export function App() {
               </div>
             </div>
             <div className="generation-toggle-row">
-              <span>
-                {t("🗂 Show archived", "🗂 Hiện dự án đã lưu trữ")}
-              </span>
+              <span>{t("🗂 Show archived", "🗂 Hiện dự án đã lưu trữ")}</span>
               <label className="switch">
                 <input
                   type="checkbox"
@@ -1331,6 +1350,22 @@ export function App() {
                       void refreshWorkspace(project.id, { resetTab: true })
                     }
                   >
+                    <div className="project-card-thumb-slot">
+                      {project.thumbnailFilePath ? (
+                        <img
+                          src={toRenderableSrc(project.thumbnailFilePath)}
+                          alt=""
+                          className="project-card-thumb"
+                        />
+                      ) : (
+                        <div
+                          className="project-card-thumb-placeholder"
+                          aria-hidden
+                        >
+                          {t("No preview yet", "Chưa có ảnh xem trước")}
+                        </div>
+                      )}
+                    </div>
                     <h3>{project.title}</h3>
                     <p>{project.visualStyle}</p>
                     <small>
@@ -1509,6 +1544,10 @@ export function App() {
                 onCopyPrompt={(character, prompt) =>
                   void copyPromptToClipboard(`${character.name} prompt`, prompt)
                 }
+                electronApi={electronApi}
+                onAfterGlobalMap={() =>
+                  void refreshWorkspace(workspace.project.id)
+                }
               />
             )}
 
@@ -1576,7 +1615,9 @@ export function App() {
                 onUpdateSpeakerVoice={updateSpeakerVoice}
                 speechAssets={speechAssets ?? []}
                 toRenderableSrc={toRenderableSrc}
-                onDownloadSpeech={(assetId) => void downloadSpeechAsset(assetId)}
+                onDownloadSpeech={(assetId) =>
+                  void downloadSpeechAsset(assetId)
+                }
                 locale={locale}
               />
             )}
@@ -1605,4 +1646,3 @@ export function App() {
     </div>
   );
 }
-

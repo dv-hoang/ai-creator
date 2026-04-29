@@ -7,9 +7,12 @@ import type {
   AppSettings,
   AssetRecord,
   Character,
+  GlobalCharacterGalleryItem,
+  GlobalLibraryImage,
   ProviderConfig,
   ProjectInput,
   ProjectRecord,
+  ProjectWithThumbnail,
   ProjectWorkspace,
   Scene,
   TranscriptRow,
@@ -51,6 +54,7 @@ interface Step1OutputRecord {
 interface AppData {
   settings: AppSettings;
   projects: ProjectRecord[];
+  globalCharacterLibrary: GlobalLibraryImage[];
 }
 
 interface ProjectData {
@@ -75,6 +79,7 @@ function defaultData(): AppData {
   return {
     settings: defaultSettings,
     projects: [],
+    globalCharacterLibrary: [],
   };
 }
 
@@ -471,6 +476,20 @@ function loadData(): AppData {
   });
   const normalizedProviders = [...dedupedProvidersByName.values()];
 
+  const libraryRaw = parsed.globalCharacterLibrary;
+  const globalCharacterLibrary: GlobalLibraryImage[] = Array.isArray(libraryRaw)
+    ? libraryRaw.filter(
+        (row): row is GlobalLibraryImage =>
+          Boolean(
+            row &&
+              typeof row === "object" &&
+              typeof (row as GlobalLibraryImage).id === "string" &&
+              typeof (row as GlobalLibraryImage).filePath === "string" &&
+              typeof (row as GlobalLibraryImage).createdAt === "string",
+          ),
+      )
+    : [];
+
   dataStore = {
     settings: {
       ...defaultSettings,
@@ -486,6 +505,7 @@ function loadData(): AppData {
       },
     },
     projects,
+    globalCharacterLibrary,
   };
   migrateLegacyProjectData(parsed, projects);
   for (const project of projects) {
@@ -570,16 +590,32 @@ export function updateProjectStatus(
   saveData();
 }
 
+function getFirstGeneratedImageFilePath(projectId: string): string | null {
+  const images = loadProjectData(projectId).assets.filter(
+    (asset) => asset.kind === "image",
+  );
+  if (images.length === 0) {
+    return null;
+  }
+  const oldest = [...images].sort((a, b) =>
+    a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0,
+  )[0];
+  return oldest?.filePath ?? null;
+}
+
 export function listProjects(options?: {
   includeArchived?: boolean;
-}): ProjectRecord[] {
+}): ProjectWithThumbnail[] {
   const includeArchived = Boolean(options?.includeArchived);
   const items = includeArchived
     ? loadData().projects
     : loadData().projects.filter((project) => !project.archivedAt);
-  return [...items].sort((a, b) =>
-    a.createdAt < b.createdAt ? 1 : -1,
-  );
+  return [...items]
+    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+    .map((project) => ({
+      ...project,
+      thumbnailFilePath: getFirstGeneratedImageFilePath(project.id),
+    }));
 }
 
 export function getProject(projectId: string): ProjectRecord {
@@ -902,4 +938,81 @@ export function getProjectAssetsDir(projectId: string): string {
 
 export function ensureDirForFile(filePath: string): void {
   mkdirSync(dirname(filePath), { recursive: true });
+}
+
+export function resolveGlobalLibraryDir(): string {
+  const baseDir = app.isPackaged
+    ? join(app.getPath("userData"), "data")
+    : join(process.cwd(), "data");
+  const directory = join(baseDir, "global-characters");
+  mkdirSync(directory, { recursive: true });
+  return directory;
+}
+
+export function getGlobalLibraryImages(): GlobalLibraryImage[] {
+  const rows = loadData().globalCharacterLibrary ?? [];
+  return [...rows].sort((a, b) =>
+    a.createdAt < b.createdAt ? 1 : -1,
+  );
+}
+
+export function getGlobalLibraryImageById(id: string): GlobalLibraryImage | undefined {
+  return (loadData().globalCharacterLibrary ?? []).find((item) => item.id === id);
+}
+
+export function upsertGlobalLibraryImage(record: GlobalLibraryImage): void {
+  const data = loadData();
+  const existing = data.globalCharacterLibrary ?? [];
+  data.globalCharacterLibrary = [
+    ...existing.filter((item) => item.id !== record.id),
+    record,
+  ];
+  saveData();
+}
+
+/** Every generated character image across projects plus library uploads. */
+export function listGlobalCharacterGallery(): GlobalCharacterGalleryItem[] {
+  const projectItems: GlobalCharacterGalleryItem[] = [];
+  for (const project of listProjects({ includeArchived: true })) {
+    const rows = getAssetsByProject(project.id);
+    for (const asset of rows) {
+      if (asset.entityType !== "character" || asset.kind !== "image") {
+        continue;
+      }
+      const characterId = asset.entityId;
+      const projectData = loadProjectData(project.id);
+      const character = projectData.characters.find(
+        (item) => item.id === characterId,
+      );
+      const characterName = character?.name ?? characterId;
+      projectItems.push({
+        tileId: `asset:${asset.id}`,
+        source: "project",
+        assetId: asset.id,
+        projectId: project.id,
+        projectTitle: project.title,
+        characterId,
+        characterName,
+        filePath: asset.filePath,
+        createdAt: asset.createdAt,
+        provider: asset.provider,
+        model: asset.model,
+      });
+    }
+  }
+
+  const libraryItems: GlobalCharacterGalleryItem[] = getGlobalLibraryImages().map(
+    (item) => ({
+      tileId: `library:${item.id}`,
+      source: "library" as const,
+      libraryId: item.id,
+      filePath: item.filePath,
+      createdAt: item.createdAt,
+      originalFileName: item.originalFileName,
+    }),
+  );
+
+  const merged = [...projectItems, ...libraryItems];
+  merged.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  return merged;
 }

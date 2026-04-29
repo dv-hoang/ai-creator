@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { copyFileSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
-import { basename, extname, join } from 'node:path';
+import { basename, dirname, extname, join } from 'node:path';
 import { ElevenLabsClient } from '@elevenlabs/elevenlabs-js';
 import { GoogleGenAI } from '@google/genai';
 import type { AppSettings, GenerationTask, ProviderName, Step1Response, ValidateProviderResult } from '@shared/types';
@@ -10,7 +10,11 @@ import { stripJsonFence } from './template';
 
 type SharpLike = (input: string) => {
   rotate: () => ReturnType<SharpLike>;
-  resize: (options: { width: number; withoutEnlargement: boolean }) => ReturnType<SharpLike>;
+  resize: (
+    widthOrOptions: number | Record<string, unknown>,
+    height?: number,
+    options?: { fit?: string; withoutEnlargement?: boolean },
+  ) => ReturnType<SharpLike>;
   webp: (options: { quality: number; effort: number }) => ReturnType<SharpLike>;
   toFile: (path: string) => Promise<unknown>;
 };
@@ -19,6 +23,9 @@ let cachedSharp: SharpLike | null = null;
 let sharpLoadError: string | null = null;
 const elevenLabsClients = new Map<string, ElevenLabsClient>();
 const googleGenAiClients = new Map<string, GoogleGenAI>();
+
+/** Max width/height for character images (fit inside, preserve aspect, no upscale). */
+export const CHARACTER_IMAGE_MAX_EDGE_PX = 1536;
 
 async function loadSharp(): Promise<SharpLike | null> {
   if (cachedSharp) {
@@ -253,7 +260,10 @@ async function archiveAndCompressGeneratedImage(
 
   await sharp(filePath)
     .rotate()
-    .resize({ width: 1536, withoutEnlargement: true })
+    .resize(CHARACTER_IMAGE_MAX_EDGE_PX, CHARACTER_IMAGE_MAX_EDGE_PX, {
+      fit: 'inside',
+      withoutEnlargement: true
+    })
     .webp({ quality: 80, effort: 6 })
     .toFile(tempPath);
 
@@ -272,6 +282,112 @@ async function archiveAndCompressGeneratedImage(
       reductionPercent: beforeBytes > 0 ? Number((((beforeBytes - afterBytes) / beforeBytes) * 100).toFixed(2)) : 0,
       archivedOriginalPath,
       compressedPath
+    }
+  };
+}
+
+/**
+ * Read-only on source: compress an arbitrary image into a project's assets/compressed folder
+ * (same pipeline as generated images) for global → project character mapping.
+ */
+export async function compressCopyImageForCharacterMapping(
+  absoluteSourcePath: string,
+  projectAssetsDir: string,
+  fileNameBase: string
+): Promise<{ filePath: string; metadata: Record<string, unknown> }> {
+  const sharp = await loadSharp();
+  if (!sharp) {
+    throw new Error(sharpLoadError ?? 'sharp module could not be loaded');
+  }
+
+  const extension = absoluteSourcePath.split('.').pop()?.toLowerCase() ?? '';
+  if (!['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'].includes(extension)) {
+    throw new Error(`Unsupported image format for mapping: .${extension}`);
+  }
+
+  const compressedDir = join(projectAssetsDir, 'compressed');
+  mkdirSync(compressedDir, { recursive: true });
+  const compressedPath = join(compressedDir, `${fileNameBase}.webp`);
+  const tempPath = `${compressedPath}.tmp`;
+  const beforeBytes = statSync(absoluteSourcePath).size;
+
+  await sharp(absoluteSourcePath)
+    .rotate()
+    .resize(CHARACTER_IMAGE_MAX_EDGE_PX, CHARACTER_IMAGE_MAX_EDGE_PX, {
+      fit: 'inside',
+      withoutEnlargement: true
+    })
+    .webp({ quality: 80, effort: 6 })
+    .toFile(tempPath);
+
+  renameSync(tempPath, compressedPath);
+
+  const afterBytes = statSync(compressedPath).size;
+  return {
+    filePath: compressedPath,
+    metadata: {
+      compressed: true,
+      sourceFormat: extension,
+      targetFormat: 'webp',
+      mapped: true,
+      maxEdgePx: CHARACTER_IMAGE_MAX_EDGE_PX,
+      fit: 'inside',
+      beforeBytes,
+      afterBytes,
+      reductionPercent:
+        beforeBytes > 0
+          ? Number((((beforeBytes - afterBytes) / beforeBytes) * 100).toFixed(2))
+          : 0
+    }
+  };
+}
+
+/** Store a compressed .webp under the global characters library folder. */
+export async function compressImageToLibraryWebp(
+  absoluteSourcePath: string,
+  outputWebpFullPath: string
+): Promise<{ filePath: string; metadata: Record<string, unknown> }> {
+  const sharp = await loadSharp();
+  if (!sharp) {
+    throw new Error(sharpLoadError ?? 'sharp module could not be loaded');
+  }
+
+  const extension = absoluteSourcePath.split('.').pop()?.toLowerCase() ?? '';
+  if (!['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'].includes(extension)) {
+    throw new Error(`Unsupported image format for upload: .${extension}`);
+  }
+
+  mkdirSync(dirname(outputWebpFullPath), { recursive: true });
+  const tempPath = `${outputWebpFullPath}.tmp`;
+  const beforeBytes = statSync(absoluteSourcePath).size;
+
+  await sharp(absoluteSourcePath)
+    .rotate()
+    .resize(CHARACTER_IMAGE_MAX_EDGE_PX, CHARACTER_IMAGE_MAX_EDGE_PX, {
+      fit: 'inside',
+      withoutEnlargement: true
+    })
+    .webp({ quality: 80, effort: 6 })
+    .toFile(tempPath);
+
+  renameSync(tempPath, outputWebpFullPath);
+
+  const afterBytes = statSync(outputWebpFullPath).size;
+  return {
+    filePath: outputWebpFullPath,
+    metadata: {
+      compressed: true,
+      uploaded: true,
+      maxEdgePx: CHARACTER_IMAGE_MAX_EDGE_PX,
+      fit: 'inside',
+      sourceFormat: extension,
+      targetFormat: 'webp',
+      beforeBytes,
+      afterBytes,
+      reductionPercent:
+        beforeBytes > 0
+          ? Number((((beforeBytes - afterBytes) / beforeBytes) * 100).toFixed(2))
+          : 0
     }
   };
 }
