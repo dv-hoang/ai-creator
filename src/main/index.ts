@@ -1,7 +1,7 @@
-import { app, BrowserWindow, net, protocol } from 'electron';
+import { app, BrowserWindow, protocol } from 'electron';
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { dirname, extname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { dirname, extname, isAbsolute, join, normalize, resolve } from 'node:path';
+import { fileURLToPath, URL } from 'node:url';
 import { registerIpc } from './ipc';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -71,12 +71,39 @@ function mimeTypeFromPath(filePath: string): string {
   return 'application/octet-stream';
 }
 
+function resolveLocalAssetDiskPath(requestUrl: string): string | null {
+  try {
+    const url = new URL(requestUrl);
+    const fromQuery = url.searchParams.get('path')?.trim();
+    if (fromQuery) {
+      const normalized = normalize(fromQuery);
+      return isAbsolute(normalized) ? normalized : resolve(process.cwd(), normalized);
+    }
+  } catch {
+    /* fall through */
+  }
+  try {
+    const marker = '?path=';
+    const idx = requestUrl.indexOf(marker);
+    if (idx === -1) return null;
+    const encoded = requestUrl.slice(idx + marker.length).split('&')[0] ?? '';
+    const decoded = decodeURIComponent(encoded);
+    const normalized = normalize(decoded.trim());
+    if (!normalized) return null;
+    return isAbsolute(normalized) ? normalized : resolve(process.cwd(), normalized);
+  } catch {
+    return null;
+  }
+}
+
 app.whenReady().then(() => {
   protocol.handle('local-asset', (request) => {
-    const pathParam = request.url.split('?path=')[1] ?? '';
-    const assetPath = pathParam ? decodeURIComponent(pathParam) : '';
+    const assetPath = resolveLocalAssetDiskPath(request.url);
     if (!assetPath) {
-      return new Response('Missing path', { status: 400 });
+      return new Response('Missing or invalid path', { status: 400 });
+    }
+    if (!existsSync(assetPath)) {
+      return new Response('Not found', { status: 404 });
     }
     const extension = extname(assetPath).toLowerCase();
     const isMedia =
@@ -87,7 +114,23 @@ app.whenReady().then(() => {
       extension === '.mp4' ||
       extension === '.webm';
     if (!isMedia) {
-      return net.fetch(pathToFileURL(assetPath).toString());
+      try {
+        const fileStat = statSync(assetPath);
+        const bytes = readFileSync(assetPath);
+        const mimeType = mimeTypeFromPath(assetPath);
+        return new Response(request.method === 'HEAD' ? null : bytes, {
+          status: 200,
+          headers: {
+            'Content-Type': mimeType,
+            'Content-Length': String(fileStat.size),
+            'Cache-Control': 'no-cache'
+          }
+        });
+      } catch (error) {
+        return new Response(error instanceof Error ? error.message : 'Failed to read asset', {
+          status: 404
+        });
+      }
     }
 
     try {

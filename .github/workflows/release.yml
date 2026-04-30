@@ -20,9 +20,16 @@ jobs:
           cache: yarn
 
       - run: yarn install --frozen-lockfile
-      # electron-builder auto-publishes on tag in CI (needs GH_TOKEN); CI uses
-      # dist:mac:all:ci (--publish never) and uploads via action-gh-release instead.
-      - run: yarn dist:mac:all:ci
+      # Signed universal matrix (arm64 + x64), --publish never; upload artifacts below.
+      # Add matching repository secrets for anything you rely on locally.
+      - run: yarn dist:mac:signed:all
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          CSC_NAME: ${{ secrets.CSC_NAME }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2

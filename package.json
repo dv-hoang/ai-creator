@@ -23,6 +23,7 @@
   "description": "AI Creator desktop app",
   "dependencies": {
     "@elevenlabs/elevenlabs-js": "^2.44.0",
+    "@fal-ai/client": "^1.10.0",
     "@google/genai": "^1.50.1",
     "notistack": "^3.0.2",
     "react": "^19.2.5",

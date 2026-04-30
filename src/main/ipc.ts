@@ -1,7 +1,16 @@
 import { app, dialog, ipcMain, shell } from 'electron';
-import { copyFileSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  renameSync,
+  writeFileSync
+} from 'node:fs';
 import { basename, dirname, extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { falModelsForGenerationTask } from '../shared/falModelFilters';
+import { sanitizeProviderValidation } from '../shared/providerValidation';
 import type {
   AppSettings,
   Character,
@@ -57,6 +66,7 @@ import {
   generateSpeech,
   generateStep1,
   refineStep1Response,
+  fetchFalModelCatalog,
   generateVideoFromImage,
   listProviderModels,
   synthesizeElevenLabsSpeechPreview,
@@ -189,6 +199,33 @@ function activeScenePrompts(scene: Scene): { textToImage: string; imageToVideo: 
   };
 }
 
+/** Prefer DB path when present on disk; else same stem under assets/origin/ (compression archives there). */
+function resolveReadableReferenceImagePath(projectId: string, storedPath: string): string | null {
+  if (existsSync(storedPath)) {
+    return storedPath;
+  }
+  const assetsRoot = getProjectAssetsDir(projectId);
+  const originDir = join(assetsRoot, 'origin');
+  if (!existsSync(originDir)) {
+    return null;
+  }
+  const stem = basename(storedPath, extname(storedPath));
+  try {
+    for (const name of readdirSync(originDir)) {
+      if (basename(name, extname(name)) !== stem) {
+        continue;
+      }
+      const candidate = join(originDir, name);
+      if (existsSync(candidate)) {
+        return candidate;
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 function resolveSceneCharacterReferencePaths(scene: Scene): string[] {
   const requiredNames = new Set(scene.requiredCharacterRefs);
   if (requiredNames.size === 0) {
@@ -214,10 +251,14 @@ function resolveSceneCharacterReferencePaths(scene: Scene): string[] {
 
     if (character.linkedAssetId) {
       try {
-        references.add(getAsset(character.linkedAssetId).filePath);
-        continue;
+        const stored = getAsset(character.linkedAssetId).filePath;
+        const readable = resolveReadableReferenceImagePath(scene.projectId, stored);
+        if (readable) {
+          references.add(readable);
+          continue;
+        }
       } catch {
-        // Fallback to the latest generated character image when linked asset is missing.
+        /* fall through */
       }
     }
 
@@ -226,7 +267,13 @@ function resolveSceneCharacterReferencePaths(scene: Scene): string[] {
       continue;
     }
     generatedImages.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-    references.add(generatedImages[0].filePath);
+    const readable = resolveReadableReferenceImagePath(
+      scene.projectId,
+      generatedImages[0].filePath
+    );
+    if (readable) {
+      references.add(readable);
+    }
   }
 
   return [...references];
@@ -277,12 +324,26 @@ function withSceneSpeechFileName(filePath: string, sceneIndex: number, speaker: 
 const taskSupportedProviders: Record<GenerationTask, ProviderName[]> = {
   generateScript: ['openai', 'gemini'],
   generateImage: ['openai', 'gemini', 'fal'],
-  generateVideo: ['openai', 'gemini'],
+  generateVideo: ['openai', 'gemini', 'fal'],
   textToSpeech: ['elevenlabs']
 };
 
-function getCompatibleModelsForTask(task: GenerationTask, provider: ProviderName, models: string[]): string[] {
-  if (provider === 'fal' || provider === 'elevenlabs') {
+function getCompatibleModelsForTask(
+  task: GenerationTask,
+  provider: ProviderName,
+  models: string[],
+  falCategories?: AppSettings['falModelCategories'],
+): string[] {
+  if (provider === 'fal') {
+    if (task === 'generateImage') {
+      return falModelsForGenerationTask('generateImage', models, falCategories);
+    }
+    if (task === 'generateVideo') {
+      return falModelsForGenerationTask('generateVideo', models, falCategories);
+    }
+    return [];
+  }
+  if (provider === 'elevenlabs') {
     return models;
   }
 
@@ -326,10 +387,20 @@ function normalizeTaskMappingsForSave(settings: AppSettings): AppSettings['taskM
     const candidates = configuredProviders.filter((provider) => supported.includes(provider));
     const currentProvider = nextMappings[task].provider;
     const provider = candidates.includes(currentProvider) ? currentProvider : (candidates[0] ?? currentProvider);
-    const compatibleModels = getCompatibleModelsForTask(task, provider, settings.providerModels[provider] ?? []);
-    const model = compatibleModels.includes(nextMappings[task].model)
-      ? nextMappings[task].model
+    const rawCatalog = settings.providerModels[provider] ?? [];
+    const compatibleModels = getCompatibleModelsForTask(
+      task,
+      provider,
+      rawCatalog,
+      settings.falModelCategories,
+    );
+    const requestedTrim = nextMappings[task].model.trim();
+    let model = compatibleModels.includes(requestedTrim)
+      ? requestedTrim
       : (compatibleModels[0] ?? '');
+    if (provider === 'fal' && !model && requestedTrim) {
+      model = requestedTrim;
+    }
 
     nextMappings[task] = { provider, model };
   });
@@ -349,21 +420,46 @@ export function registerIpc(): void {
       const key = provider.apiKey?.trim();
       if (!key) {
         nextSettings.providerModels[providerName] = [];
+        if (providerName === 'fal') {
+          nextSettings.falModelCategories = {};
+        }
         continue;
       }
 
       try {
-        nextSettings.providerModels[providerName] = await listProviderModels(providerName, key);
+        if (providerName === 'fal') {
+          const catalog = await fetchFalModelCatalog(key);
+          nextSettings.providerModels.fal = catalog.modelIds;
+          nextSettings.falModelCategories = catalog.falCategories;
+        } else {
+          nextSettings.providerModels[providerName] = await listProviderModels(providerName, key);
+        }
       } catch {
-        nextSettings.providerModels[providerName] = [];
+        nextSettings.providerModels[providerName] =
+          settings.providerModels[providerName] ?? [];
+        if (providerName === 'fal') {
+          nextSettings.falModelCategories = settings.falModelCategories ?? {};
+        }
       }
     }
 
     nextSettings.taskModelMappings = normalizeTaskMappingsForSave(nextSettings);
+    nextSettings.providerValidation = sanitizeProviderValidation(nextSettings);
     return saveSettings(nextSettings);
   });
   bind('settings:validateProvider', (provider, apiKey?: string) => validateProvider(provider, apiKey));
-  bind('settings:listModels', (provider, apiKey?: string) => listProviderModels(provider, apiKey));
+  bind('settings:listModels', async (provider: ProviderName, apiKey?: string) => {
+    const key = apiKey?.trim();
+    if (provider === 'fal' && key) {
+      const catalog = await fetchFalModelCatalog(key);
+      return {
+        models: catalog.modelIds,
+        falModelCategories: catalog.falCategories
+      };
+    }
+    const models = await listProviderModels(provider, apiKey);
+    return { models };
+  });
   bind('settings:testVoice', async (settings: AppSettings, sampleText: string) => {
     const mapping = settings.taskModelMappings.textToSpeech;
     if (mapping.provider !== 'elevenlabs') {
@@ -512,6 +608,18 @@ export function registerIpc(): void {
   bind('characters:generateImage', async (characterId: string) => {
     const character = getCharacter(characterId);
     const project = getProject(character.projectId);
+    const referencePaths: string[] = [];
+    if (character.linkedAssetId) {
+      try {
+        const stored = getAsset(character.linkedAssetId).filePath;
+        const readable = resolveReadableReferenceImagePath(character.projectId, stored);
+        if (readable) {
+          referencePaths.push(readable);
+        }
+      } catch {
+        /* linked row missing — skip */
+      }
+    }
     const generated = await generateImage({
       projectId: character.projectId,
       entityType: 'character',
@@ -520,7 +628,8 @@ export function registerIpc(): void {
         aspectRatio: project.aspectRatio,
         visualStyle: project.visualStyle,
         artDirectionHint: project.artDirectionHint
-      })
+      }),
+      references: referencePaths
     });
 
     const asset = saveAsset({
@@ -580,6 +689,7 @@ export function registerIpc(): void {
       throw new Error('Scene not found');
     }
     const project = getProject(scene.projectId);
+    const characterReferences = resolveSceneCharacterReferencePaths(scene);
 
     const generated = await generateVideoFromImage({
       projectId: scene.projectId,
@@ -589,7 +699,8 @@ export function registerIpc(): void {
         aspectRatio: project.aspectRatio,
         visualStyle: project.visualStyle,
         artDirectionHint: project.artDirectionHint
-      })
+      }),
+      referenceImagePaths: characterReferences
     });
 
     const asset = saveAsset({

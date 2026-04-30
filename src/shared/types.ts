@@ -10,16 +10,27 @@ export interface ProviderConfig {
   apiKey: string;
 }
 
+/** Persisted result of a successful provider key check (fingerprint matches current key). */
+export interface ProviderValidationEntry {
+  validatedAt: string;
+  apiKeyFingerprint: string;
+}
+
 export interface TaskModelMapping {
   provider: ProviderName;
   model: string;
 }
+
+/** Fal catalog kind for `endpoint_id` rows from `api.fal.ai/v1/models`; used to split image vs video tasks. */
+export type FalModelCategories = Partial<Record<string, "image" | "video">>;
 
 export interface AppSettings {
   language: AppLanguage;
   providers: ProviderConfig[];
   elevenLabsVoiceId: string;
   providerModels: Partial<Record<ProviderName, string[]>>;
+  /** Populated when Flux (fal) models are listed; keys are fal `endpoint_id` strings. */
+  falModelCategories?: FalModelCategories;
   taskModelMappings: Record<GenerationTask, TaskModelMapping>;
   generationEnabled: {
     generateImage: boolean;
@@ -29,6 +40,8 @@ export interface AppSettings {
   enablePromptCalibration: boolean;
   /** Ask the model for optional end-frame fields (stored only until video pipeline supports them). */
   enableEndFramePrompts: boolean;
+  /** Last successful validate per provider; fingerprint must match current API key. */
+  providerValidation?: Partial<Record<ProviderName, ProviderValidationEntry>>;
 }
 
 export interface ProjectInput {
@@ -224,12 +237,21 @@ export interface UpdateInstallResult {
   opened: boolean;
 }
 
+/** `settings:listModels` — fal includes `falModelCategories` when the catalog loads. */
+export interface ListProviderModelsResult {
+  models: string[];
+  falModelCategories?: FalModelCategories;
+}
+
 export interface ElectronApi {
   settings: {
     get(): Promise<AppSettings>;
     save(settings: AppSettings): Promise<AppSettings>;
     validateProvider(provider: ProviderName, apiKey?: string): Promise<ValidateProviderResult>;
-    listModels(provider: ProviderName, apiKey?: string): Promise<string[]>;
+    listModels(
+      provider: ProviderName,
+      apiKey?: string,
+    ): Promise<ListProviderModelsResult>;
     testVoice(settings: AppSettings, sampleText: string): Promise<string>;
     checkForUpdates(): Promise<UpdateCheckResult>;
   };

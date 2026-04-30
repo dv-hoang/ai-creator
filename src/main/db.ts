@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { providerApiKeyFingerprint } from "../shared/providerValidation";
 import type {
   AppSettings,
   AssetRecord,
@@ -30,6 +31,7 @@ const defaultSettings: AppSettings = {
   providers: [],
   elevenLabsVoiceId: "d5HVupAWCwe4e6GvMCAL",
   providerModels: {},
+  falModelCategories: {},
   taskModelMappings: {
     generateScript: { provider: "openai", model: "gpt-5-mini" },
     generateImage: { provider: "fal", model: "fal-ai/flux/schnell" },
@@ -42,6 +44,7 @@ const defaultSettings: AppSettings = {
   },
   enablePromptCalibration: false,
   enableEndFramePrompts: false,
+  providerValidation: {},
 };
 
 interface Step1OutputRecord {
@@ -236,6 +239,30 @@ function decryptSecret(encoded: string): string {
   }
 }
 
+function normalizeProviderValidationField(
+  raw: AppSettings["providerValidation"],
+): AppSettings["providerValidation"] {
+  if (!raw || typeof raw !== "object") {
+    return {};
+  }
+  const out: NonNullable<AppSettings["providerValidation"]> = {};
+  for (const name of supportedProviderNames) {
+    const e = raw[name];
+    if (
+      e &&
+      typeof e === "object" &&
+      typeof e.validatedAt === "string" &&
+      typeof e.apiKeyFingerprint === "string"
+    ) {
+      out[name] = {
+        validatedAt: e.validatedAt,
+        apiKeyFingerprint: e.apiKeyFingerprint,
+      };
+    }
+  }
+  return out;
+}
+
 function decodeSettings(settings: AppSettings): AppSettings {
   const decodedProviders = settings.providers.map((provider) => ({
     ...provider,
@@ -253,6 +280,7 @@ function decodeSettings(settings: AppSettings): AppSettings {
       defaultSettings.enablePromptCalibration,
     enableEndFramePrompts:
       settings.enableEndFramePrompts ?? defaultSettings.enableEndFramePrompts,
+    providerValidation: normalizeProviderValidationField(settings.providerValidation),
   };
 }
 
@@ -564,6 +592,27 @@ export function initDb(): void {
   loadData();
 }
 
+/** Persist successful provider validation (plaintext key; not stored). */
+export function recordProviderValidation(
+  provider: ProviderConfig["name"],
+  plainApiKey: string,
+): void {
+  const data = loadData();
+  const decoded = decodeSettings(data.settings);
+  const nextValidation: NonNullable<AppSettings["providerValidation"]> = {
+    ...(decoded.providerValidation ?? {}),
+    [provider]: {
+      validatedAt: nowIso(),
+      apiKeyFingerprint: providerApiKeyFingerprint(plainApiKey),
+    },
+  };
+  data.settings = encodeSettings({
+    ...decoded,
+    providerValidation: nextValidation,
+  });
+  saveData();
+}
+
 export function getSettings(): AppSettings {
   return decodeSettings(loadData().settings);
 }
@@ -675,10 +724,16 @@ function getFirstGeneratedImageFilePath(projectId: string): string | null {
   if (images.length === 0) {
     return null;
   }
-  const oldest = [...images].sort((a, b) =>
+  const sorted = [...images].sort((a, b) =>
     a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0,
-  )[0];
-  return oldest?.filePath ?? null;
+  );
+  for (const asset of sorted) {
+    const p = asset.filePath?.trim();
+    if (p && existsSync(p)) {
+      return p;
+    }
+  }
+  return null;
 }
 
 export function listProjects(options?: {

@@ -21,6 +21,10 @@ export default [
         Response: 'readonly',
         setTimeout: 'readonly',
         fetch: 'readonly',
+        URL: 'readonly',
+        HTMLDivElement: 'readonly',
+        HTMLInputElement: 'readonly',
+        requestAnimationFrame: 'readonly',
         console: 'readonly',
         process: 'readonly'
       }

@@ -1,7 +1,13 @@
 import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useSnackbar } from "notistack";
+import { falModelsForGenerationTask } from "@shared/falModelFilters";
+import {
+  isProviderValidated,
+  providerApiKeyFingerprint,
+} from "@shared/providerValidation";
 import type {
   AppSettings,
+  FalModelCategories,
   AssetRecord,
   Character,
   GenerationTask,
@@ -39,7 +45,7 @@ const taskSupportedProviders: Record<
 > = {
   generateScript: ["openai", "gemini"],
   generateImage: ["openai", "gemini", "fal"],
-  generateVideo: ["openai", "gemini"],
+  generateVideo: ["openai", "gemini", "fal"],
   textToSpeech: ["elevenlabs"],
 };
 
@@ -47,8 +53,18 @@ function getCompatibleModelsForTask(
   task: GenerationTask,
   provider: TaskModelMapping["provider"],
   models: string[],
+  falModelCategories?: FalModelCategories,
 ): string[] {
-  if (provider === "fal" || provider === "elevenlabs") {
+  if (provider === "fal") {
+    if (task === "generateImage") {
+      return falModelsForGenerationTask("generateImage", models, falModelCategories);
+    }
+    if (task === "generateVideo") {
+      return falModelsForGenerationTask("generateVideo", models, falModelCategories);
+    }
+    return [];
+  }
+  if (provider === "elevenlabs") {
     return models;
   }
 
@@ -106,11 +122,13 @@ function toRenderableSrc(filePath: string): string {
     return `local-asset://open?path=${encodeURIComponent(diskPath)}`;
   }
 
-  const normalized = filePath.replaceAll("\\", "/");
-  const absolutePath = normalized.startsWith("/")
-    ? normalized
-    : `/${normalized}`;
-  return `local-asset://open?path=${encodeURIComponent(absolutePath)}`;
+  // Pass through POSIX absolute (`/…`), Windows drive paths (`C:/…`), or repo-relative
+  // paths; main resolves non-absolute paths against `process.cwd()` (do not prefix `/`).
+  const normalized = filePath.replaceAll("\\", "/").trim();
+  if (!normalized) {
+    return filePath;
+  }
+  return `local-asset://open?path=${encodeURIComponent(normalized)}`;
 }
 
 export function App() {
@@ -128,9 +146,6 @@ export function App() {
   const [workspace, setWorkspace] = useState<ProjectWorkspace | null>(null);
   const [assets, setAssets] = useState<AssetRecord[]>([]);
   const [settings, setSettings] = useState<AppSettings | null>(null);
-  const [validatedProviderKeys, setValidatedProviderKeys] = useState<
-    Partial<Record<ProviderName, string>>
-  >({});
   const [selectedTab, setSelectedTab] = useState<
     "Info" | "Characters" | "Scenes" | "Transcript"
   >("Info");
@@ -181,9 +196,21 @@ export function App() {
     settings?.providers
       .find((provider) => provider.name === "elevenlabs")
       ?.apiKey?.trim() ?? "";
+  const validatedProviders = useMemo((): Partial<
+    Record<ProviderName, boolean>
+  > => {
+    if (!settings) return {};
+    const out: Partial<Record<ProviderName, boolean>> = {};
+    for (const { value } of providerCatalog) {
+      if (isProviderValidated(settings, value)) {
+        out[value] = true;
+      }
+    }
+    return out;
+  }, [settings]);
   const showElevenLabsVoiceSettings =
     Boolean(elevenLabsKey) &&
-    validatedProviderKeys.elevenlabs === elevenLabsKey;
+    Boolean(settings && isProviderValidated(settings, "elevenlabs"));
   const lastKnownProjectStatusRef = useRef<
     Map<string, ProjectRecord["status"]>
   >(new Map());
@@ -270,7 +297,6 @@ export function App() {
     try {
       const loadedSettings = await electronApi.settings.get();
       setSettings(loadedSettings);
-      setValidatedProviderKeys({});
       setSettingsLoadError(null);
     } catch (error) {
       const message =
@@ -560,30 +586,53 @@ export function App() {
       provider,
       apiKey,
     );
-    setValidatedProviderKeys((previous) => {
-      const next = { ...previous };
-      if (result.ok) {
-        next[provider] = apiKey;
-      } else {
-        delete next[provider];
-      }
-      return next;
-    });
     enqueueSnackbar(result.message, {
       variant: result.ok ? "success" : "error",
     });
-  }
 
-  function handleProviderApiKeyChange(provider: ProviderName, apiKey: string) {
-    setValidatedProviderKeys((previous) => {
-      const validatedKey = previous[provider];
-      if (!validatedKey || validatedKey === apiKey) {
-        return previous;
+    if (result.ok && apiKey) {
+      try {
+        const listed = await electronApi.settings.listModels(provider, apiKey);
+        const models = listed.models;
+        setSettings((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            providerModels: {
+              ...prev.providerModels,
+              [provider]: models,
+            },
+            ...(provider === "fal" && listed.falModelCategories
+              ? { falModelCategories: listed.falModelCategories }
+              : {}),
+            providerValidation: {
+              ...prev.providerValidation,
+              [provider]: {
+                validatedAt: new Date().toISOString(),
+                apiKeyFingerprint: providerApiKeyFingerprint(apiKey),
+              },
+            },
+          };
+        });
+        const providerLabel =
+          providerCatalog.find((item) => item.value === provider)?.label ??
+          provider;
+        enqueueSnackbar(
+          t(
+            `Loaded ${models.length} model(s) for ${providerLabel}.`,
+            `Đã tải ${models.length} model cho ${providerLabel}.`,
+          ),
+          { variant: "success" },
+        );
+      } catch (error) {
+        enqueueSnackbar(
+          error instanceof Error
+            ? error.message
+            : t("Failed to load models.", "Không thể tải danh sách model."),
+          { variant: "error" },
+        );
       }
-      const next = { ...previous };
-      delete next[provider];
-      return next;
-    });
+    }
   }
 
   async function regenerateCharacterImage(character: Character) {
@@ -1214,7 +1263,6 @@ export function App() {
             onValidateProvider={(provider) =>
               void handleValidateProvider(provider)
             }
-            onProviderApiKeyChange={handleProviderApiKeyChange}
             onDuplicateProvider={() =>
               enqueueSnackbar(
                 t(
@@ -1232,10 +1280,10 @@ export function App() {
             getCompatibleModelsForTask={getCompatibleModelsForTask}
             showElevenLabsVoiceSettings={showElevenLabsVoiceSettings}
             validatedProviders={{
-              openai: Boolean(validatedProviderKeys.openai),
-              gemini: Boolean(validatedProviderKeys.gemini),
-              fal: Boolean(validatedProviderKeys.fal),
-              elevenlabs: Boolean(validatedProviderKeys.elevenlabs),
+              openai: Boolean(validatedProviders.openai),
+              gemini: Boolean(validatedProviders.gemini),
+              fal: Boolean(validatedProviders.fal),
+              elevenlabs: Boolean(validatedProviders.elevenlabs),
             }}
           />
         )}

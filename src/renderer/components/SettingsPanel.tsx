@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
+import { omitProviderValidation } from "@shared/providerValidation";
 import type {
   AppSettings,
+  FalModelCategories,
   GenerationTask,
   ProviderName,
   TaskModelMapping,
 } from "@shared/types";
+import { SearchableModelSelect } from "./SearchableModelSelect";
 
 type SettingsTab = "general" | "providers" | "controls";
 
@@ -19,7 +22,6 @@ export function SettingsPanel(props: {
   onTestVoice: (text: string) => void;
   onRetryLoad: () => void;
   onValidateProvider: (provider: TaskModelMapping["provider"]) => void;
-  onProviderApiKeyChange: (provider: ProviderName, apiKey: string) => void;
   onDuplicateProvider: () => void;
   setSettings: (settings: AppSettings) => void;
   updateTaskMapping: (
@@ -39,6 +41,7 @@ export function SettingsPanel(props: {
     task: GenerationTask,
     provider: TaskModelMapping["provider"],
     models: string[],
+    falModelCategories?: FalModelCategories,
   ) => string[];
   showElevenLabsVoiceSettings: boolean;
   validatedProviders: Partial<Record<ProviderName, boolean>>;
@@ -182,10 +185,8 @@ export function SettingsPanel(props: {
                           value={providerRecord.apiKey}
                           onChange={(event) => {
                             const nextApiKey = event.target.value;
-                            props.onProviderApiKeyChange(
-                              providerRecord.name,
-                              nextApiKey,
-                            );
+                            const priorTrim = providerRecord.apiKey.trim();
+                            const nextTrim = nextApiKey.trim();
                             const nextProviders = props.settings!.providers.map(
                               (item, itemIndex) =>
                                 itemIndex === index
@@ -195,6 +196,14 @@ export function SettingsPanel(props: {
                             props.setSettings({
                               ...props.settings!,
                               providers: nextProviders,
+                              ...(priorTrim !== nextTrim
+                                ? {
+                                    providerValidation: omitProviderValidation(
+                                      props.settings!.providerValidation,
+                                      providerRecord.name,
+                                    ),
+                                  }
+                                : {}),
                             });
                           }}
                         />
@@ -316,8 +325,34 @@ export function SettingsPanel(props: {
                       props.settings!.providerModels[
                         currentProvider as TaskModelMapping["provider"]
                       ] ?? [],
+                      props.settings!.falModelCategories,
                     )
                   : [];
+                const mappingModel = props.settings!.taskModelMappings[task].model;
+                const resolvedModel = modelsForCurrentProvider.includes(mappingModel)
+                  ? mappingModel
+                  : (modelsForCurrentProvider[0] ?? mappingModel);
+
+                const modelPickerAriaLabel =
+                  task === "generateScript"
+                    ? t(
+                        "Search or choose the model used for Generate Script",
+                        "Tìm hoặc chọn model cho Generate Script",
+                      )
+                    : task === "generateImage"
+                      ? t(
+                          "Search or choose the model used for Generate Image",
+                          "Tìm hoặc chọn model cho Generate Image",
+                        )
+                      : task === "generateVideo"
+                        ? t(
+                            "Search or choose the model used for Generate Video",
+                            "Tìm hoặc chọn model cho Generate Video",
+                          )
+                        : t(
+                            "Search or choose the model used for text-to-speech",
+                            "Tìm hoặc chọn model cho chuyển văn bản thành giọng nói",
+                          );
 
                 return (
                   <div key={task} className="task-mapping-row">
@@ -331,6 +366,7 @@ export function SettingsPanel(props: {
                           task,
                           nextProvider,
                           props.settings!.providerModels[nextProvider] ?? [],
+                          props.settings!.falModelCategories,
                         );
                         const fallbackModel =
                           availableModels[0] ??
@@ -357,37 +393,27 @@ export function SettingsPanel(props: {
                         ))
                       )}
                     </select>
-                    <select
-                      value={
-                        modelsForCurrentProvider.includes(
-                          props.settings!.taskModelMappings[task].model,
-                        )
-                          ? props.settings!.taskModelMappings[task].model
-                          : (modelsForCurrentProvider[0] ??
-                            props.settings!.taskModelMappings[task].model)
-                      }
-                      onChange={(event) =>
-                        props.updateTaskMapping(task, {
-                          model: event.target.value,
-                        })
+                    <SearchableModelSelect
+                      options={modelsForCurrentProvider}
+                      value={resolvedModel}
+                      onChange={(model) =>
+                        props.updateTaskMapping(task, { model })
                       }
                       disabled={modelsForCurrentProvider.length === 0}
-                    >
-                      {modelsForCurrentProvider.length === 0 ? (
-                        <option value={props.settings!.taskModelMappings[task].model}>
-                          {t(
-                            "No models loaded for this provider",
-                            "Chưa có model nào được tải cho provider này",
-                          )}
-                        </option>
-                      ) : (
-                        modelsForCurrentProvider.map((model) => (
-                          <option key={model} value={model}>
-                            {model}
-                          </option>
-                        ))
+                      emptyPlaceholder={t(
+                        "No models loaded for this provider",
+                        "Chưa có model nào được tải cho provider này",
                       )}
-                    </select>
+                      searchPlaceholder={t(
+                        "Search models…",
+                        "Tìm model…",
+                      )}
+                      noMatchesHint={t(
+                        "No matching models",
+                        "Không có model khớp",
+                      )}
+                      ariaLabel={modelPickerAriaLabel}
+                    />
                     {task === "textToSpeech" && props.showElevenLabsVoiceSettings && (
                       <label style={{ gridColumn: "1 / -1" }}>
                         {t("ElevenLabs Voice ID", "ElevenLabs Voice ID")}
