@@ -42,6 +42,8 @@ import {
   updateTranscriptVoiceBySpeaker,
   updateCharacterPrompt,
   updateProjectStatus,
+  updateProjectProcessingMessage,
+  updateProjectScriptMeta,
   updateScenePrompts,
   getGlobalLibraryImageById,
   listGlobalCharacterGallery,
@@ -54,6 +56,7 @@ import {
   generateImage,
   generateSpeech,
   generateStep1,
+  refineStep1Response,
   generateVideoFromImage,
   listProviderModels,
   synthesizeElevenLabsSpeechPreview,
@@ -85,7 +88,8 @@ function projectToScriptInput(project: ProjectRecord): ProjectInput {
     transcriptLanguagePolicy: project.transcriptLanguagePolicy,
     aspectRatio: project.aspectRatio,
     visualStyle: project.visualStyle,
-    artDirectionHint: project.artDirectionHint
+    artDirectionHint: project.artDirectionHint,
+    deliveryProfile: project.deliveryProfile ?? 'short_form'
   };
 }
 
@@ -93,9 +97,25 @@ function runStep1ScriptPipeline(project: ProjectRecord): void {
   const input = projectToScriptInput(project);
   void (async () => {
     try {
-      const prompt = renderAnimationPrompt(input);
-      const response = await generateStep1(prompt);
+      updateProjectProcessingMessage(project.id, 'Generating script…');
+      const settings = getSettings();
+      const prompt = renderAnimationPrompt(input, {
+        enableEndFramePrompts: settings.enableEndFramePrompts
+      });
+      let response = await generateStep1(prompt);
+      if (settings.enablePromptCalibration) {
+        updateProjectProcessingMessage(project.id, 'Calibrating prompts…');
+        try {
+          response = await refineStep1Response(response);
+        } catch {
+          // keep initial Step 1 output if refinement fails
+        }
+      }
       saveStep1Output(project.id, JSON.stringify(response), JSON.stringify(response));
+      updateProjectScriptMeta(project.id, {
+        logline: response.logline?.trim() ? response.logline.trim() : null,
+        theme: response.theme?.trim() ? response.theme.trim() : null
+      });
       const normalized = normalizeStep1(project.id, response);
       saveCharacters(normalized.characters);
       saveScenes(normalized.scenes);
@@ -115,7 +135,10 @@ function normalizeStep1(projectId: string, response: Step1Response) {
     description: item.prompt,
     promptTextToImage: item.prompt,
     promptOverride: null,
-    linkedAssetId: null
+    linkedAssetId: null,
+    negativeConsistency: item.negative_consistency?.trim()
+      ? item.negative_consistency.trim()
+      : null
   }));
 
   const scenes = response.scenes.map((item) => ({
@@ -133,7 +156,13 @@ function normalizeStep1(projectId: string, response: Step1Response) {
     promptImageToVideo: item.image_to_video_prompt,
     promptOverrideTextToImage: null,
     promptOverrideImageToVideo: null,
-    requiredCharacterRefs: item.characters_present
+    requiredCharacterRefs: item.characters_present,
+    shotSize: item.shot_size ?? null,
+    ambientSound: item.ambient_sound?.trim() ? item.ambient_sound.trim() : null,
+    soundEffect: item.sound_effect?.trim() ? item.sound_effect.trim() : null,
+    dialogueCue: item.dialogue_cue?.trim() ? item.dialogue_cue.trim() : null,
+    endFramePrompt: item.end_frame_prompt?.trim() ? item.end_frame_prompt.trim() : null,
+    needsEndFrame: typeof item.needs_end_frame === 'boolean' ? item.needs_end_frame : null
   }));
 
   const transcripts = response.transcript.map((item) => ({

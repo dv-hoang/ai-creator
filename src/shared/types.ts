@@ -2,6 +2,9 @@ export type AppLanguage = 'en' | 'vi';
 export type ProviderName = 'openai' | 'gemini' | 'fal' | 'elevenlabs';
 export type GenerationTask = 'generateScript' | 'generateImage' | 'generateVideo' | 'textToSpeech';
 
+/** Step-1 script style: short-form viral vs professional animation pacing. */
+export type DeliveryProfile = 'short_form' | 'animation_studio';
+
 export interface ProviderConfig {
   name: ProviderName;
   apiKey: string;
@@ -22,6 +25,10 @@ export interface AppSettings {
     generateImage: boolean;
     generateVideo: boolean;
   };
+  /** Second LLM pass after Step 1 to tighten continuity and prompts. */
+  enablePromptCalibration: boolean;
+  /** Ask the model for optional end-frame fields (stored only until video pipeline supports them). */
+  enableEndFramePrompts: boolean;
 }
 
 export interface ProjectInput {
@@ -32,6 +39,7 @@ export interface ProjectInput {
   aspectRatio: string;
   visualStyle: string;
   artDirectionHint: string;
+  deliveryProfile: DeliveryProfile;
 }
 
 export interface ProjectRecord extends ProjectInput {
@@ -41,6 +49,9 @@ export interface ProjectRecord extends ProjectInput {
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Filled after successful Step 1 when the model returns them. */
+  logline: string | null;
+  theme: string | null;
 }
 
 /** `projects:list` attaches the earliest generated image path (never persisted on disk). */
@@ -56,7 +67,11 @@ export interface Character {
   promptTextToImage: string;
   promptOverride: string | null;
   linkedAssetId: string | null;
+  /** Identity lock / do-not-change hints from Step 1 (optional). */
+  negativeConsistency: string | null;
 }
+
+export type ShotSize = 'WS' | 'MS' | 'CU' | 'ECU' | 'FS';
 
 export interface Scene {
   id: string;
@@ -75,6 +90,12 @@ export interface Scene {
   promptOverrideTextToImage: string | null;
   promptOverrideImageToVideo: string | null;
   requiredCharacterRefs: string[];
+  shotSize: ShotSize | null;
+  ambientSound: string | null;
+  soundEffect: string | null;
+  dialogueCue: string | null;
+  endFramePrompt: string | null;
+  needsEndFrame: boolean | null;
 }
 
 export interface TranscriptRow {
@@ -105,7 +126,9 @@ export interface AssetRecord {
 }
 
 export interface Step1Response {
-  characters: Array<{ name: string; prompt: string }>;
+  logline?: string;
+  theme?: string;
+  characters: Array<{ name: string; prompt: string; negative_consistency?: string }>;
   transcript: Array<{
     scene: number;
     speaker: string;
@@ -125,6 +148,12 @@ export interface Step1Response {
     clip_duration_sec: number;
     image_prompt: string;
     image_to_video_prompt: string;
+    shot_size?: ShotSize;
+    ambient_sound?: string;
+    sound_effect?: string;
+    dialogue_cue?: string;
+    end_frame_prompt?: string;
+    needs_end_frame?: boolean;
   }>;
 }
 

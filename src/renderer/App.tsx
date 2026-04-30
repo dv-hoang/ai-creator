@@ -93,6 +93,7 @@ const emptyProjectInput: ProjectInput = {
   aspectRatio: "16:9",
   visualStyle: "Pixar 3D",
   artDirectionHint: "cinematic lighting",
+  deliveryProfile: "short_form",
 };
 
 function toRenderableSrc(filePath: string): string {
@@ -1064,6 +1065,7 @@ export function App() {
       aspectRatio: project.aspectRatio,
       visualStyle: project.visualStyle,
       artDirectionHint: project.artDirectionHint,
+      deliveryProfile: project.deliveryProfile ?? "short_form",
     });
     setActivePage("createProject");
   }

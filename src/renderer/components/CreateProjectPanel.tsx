@@ -1,4 +1,4 @@
-import type { ProjectInput } from "@shared/types";
+import type { DeliveryProfile, ProjectInput } from "@shared/types";
 import visualStyleGridImage from "../../assets/visual-styles/style-grid.png";
 
 const promptLanguageOptions = ["English", "Vietnamese"] as const;
@@ -10,6 +10,19 @@ const aspectRatioPresets = [
   { value: "3:4", width: 3, height: 4 },
   { value: "21:9", width: 21, height: 9 },
 ] as const;
+const deliveryProfileOptions: { value: DeliveryProfile; en: string; vi: string }[] = [
+  {
+    value: "short_form",
+    en: "Short form / social (viral pacing)",
+    vi: "Nội dung ngắn / mạng xã hội (nhịp viral)",
+  },
+  {
+    value: "animation_studio",
+    en: "Animation studio (film grammar, continuity)",
+    vi: "Phim hoạt hình / studio (ngữ pháp điện ảnh, liên tục)",
+  },
+];
+
 const visualStyleOptions = [
   "Pixar 3D",
   "Studio Ghibli",
@@ -75,6 +88,30 @@ export function CreateProjectPanel(props: {
             })
           }
         />
+      </label>
+      <label>
+        {t("Delivery profile", "Hồ sơ giao hàng")}
+        <select
+          value={props.projectForm.deliveryProfile}
+          onChange={(event) =>
+            props.setProjectForm({
+              ...props.projectForm,
+              deliveryProfile: event.target.value as DeliveryProfile,
+            })
+          }
+        >
+          {deliveryProfileOptions.map((option) => (
+            <option key={option.value} value={option.value}>
+              {t(option.en, option.vi)}
+            </option>
+          ))}
+        </select>
+        <span className="muted" style={{ display: "block", marginTop: 6 }}>
+          {t(
+            "Controls Step 1 instructions: short-form hooks vs. calmer professional animation pacing.",
+            "Điều khiển hướng dẫn Bước 1: hook dạng ngắn so với nhịp phim hoạt hình chuyên nghiệp điềm hơn.",
+          )}
+        </span>
       </label>
       <label>
         {t("Content", "Nội dung")}

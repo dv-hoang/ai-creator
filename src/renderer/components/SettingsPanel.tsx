@@ -493,6 +493,56 @@ export function SettingsPanel(props: {
                   <span className="switch-slider" />
                 </label>
               </div>
+              <div className="generation-toggle-row">
+                <span>
+                  {t(
+                    "Prompt calibration (Step 1b): second pass for continuity & prompt polish (same Generate Script model).",
+                    "Hiệu chỉnh prompt (1b): chạy thêm một lượt cho tính liên tục và prompt (cùng mô hình Generate Script).",
+                  )}
+                </span>
+                <label
+                  className="switch"
+                  aria-label={t("Toggle prompt calibration", "Bật/tắt hiệu chỉnh prompt")}
+                >
+                  <input
+                    type="checkbox"
+                    checked={props.settings.enablePromptCalibration}
+                    onChange={() =>
+                      props.setSettings({
+                        ...props.settings!,
+                        enablePromptCalibration:
+                          !props.settings!.enablePromptCalibration,
+                      })
+                    }
+                  />
+                  <span className="switch-slider" />
+                </label>
+              </div>
+              <div className="generation-toggle-row">
+                <span>
+                  {t(
+                    "End-frame prompt fields (experimental): model may output needs_end_frame / end_frame_prompt; video pipeline unchanged.",
+                    "Trường khung cuối (thử nghiệm): mô hình có thể trả needs_end_frame / end_frame_prompt; luồng video chưa đổi.",
+                  )}
+                </span>
+                <label
+                  className="switch"
+                  aria-label={t("Toggle end frame prompts", "Bật/tắt prompt khung cuối")}
+                >
+                  <input
+                    type="checkbox"
+                    checked={props.settings.enableEndFramePrompts}
+                    onChange={() =>
+                      props.setSettings({
+                        ...props.settings!,
+                        enableEndFramePrompts:
+                          !props.settings!.enableEndFramePrompts,
+                      })
+                    }
+                  />
+                  <span className="switch-slider" />
+                </label>
+              </div>
             </div>
           )}
         </>

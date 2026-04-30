@@ -16,7 +16,7 @@ export default async function notarizeApp(context) {
   const appBundleId = packager.appInfo.id;
   const appName = packager.appInfo.productFilename;
 
-  if (!appleId || !applePassword || !teamId) {
+  if (!appleId) {
     console.log(
       "[notarize] Skipped (missing APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID)."
     );

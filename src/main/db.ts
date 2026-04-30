@@ -40,6 +40,8 @@ const defaultSettings: AppSettings = {
     generateImage: true,
     generateVideo: true,
   },
+  enablePromptCalibration: false,
+  enableEndFramePrompts: false,
 };
 
 interface Step1OutputRecord {
@@ -87,11 +89,35 @@ function normalizeProjectRecord(project: ProjectRecord): ProjectRecord {
   const normalizedStatusDetail =
     project.status === "error"
       ? project.statusDetail?.trim() || "Unknown generation error"
-      : null;
+      : project.status === "processing"
+        ? (project.statusDetail?.trim() ?? null)
+        : null;
   return {
     ...project,
+    deliveryProfile: project.deliveryProfile ?? "short_form",
+    logline: project.logline ?? null,
+    theme: project.theme ?? null,
     statusDetail: normalizedStatusDetail,
     archivedAt: project.archivedAt ?? null,
+  };
+}
+
+function normalizeCharacterRow(character: Character): Character {
+  return {
+    ...character,
+    negativeConsistency: character.negativeConsistency ?? null,
+  };
+}
+
+function normalizeSceneRow(scene: Scene): Scene {
+  return {
+    ...scene,
+    shotSize: scene.shotSize ?? null,
+    ambientSound: scene.ambientSound ?? null,
+    soundEffect: scene.soundEffect ?? null,
+    dialogueCue: scene.dialogueCue ?? null,
+    endFramePrompt: scene.endFramePrompt ?? null,
+    needsEndFrame: scene.needsEndFrame ?? null,
   };
 }
 
@@ -222,6 +248,11 @@ function decodeSettings(settings: AppSettings): AppSettings {
     elevenLabsVoiceId:
       (settings.elevenLabsVoiceId ?? "").trim() ||
       defaultSettings.elevenLabsVoiceId,
+    enablePromptCalibration:
+      settings.enablePromptCalibration ??
+      defaultSettings.enablePromptCalibration,
+    enableEndFramePrompts:
+      settings.enableEndFramePrompts ?? defaultSettings.enableEndFramePrompts,
   };
 }
 
@@ -306,8 +337,10 @@ function loadProjectData(projectId: string): ProjectData {
   const parsed = JSON.parse(raw) as Partial<ProjectData>;
   const normalized: ProjectData = {
     step1Outputs: parsed.step1Outputs ?? [],
-    characters: parsed.characters ?? [],
-    scenes: parsed.scenes ?? [],
+    characters: (parsed.characters ?? []).map((row) =>
+      normalizeCharacterRow(row as Character),
+    ),
+    scenes: (parsed.scenes ?? []).map((row) => normalizeSceneRow(row as Scene)),
     transcripts: (parsed.transcripts ?? []).map((row) => ({
       ...row,
       voiceId: row.voiceId ?? "",
@@ -503,6 +536,16 @@ function loadData(): AppData {
         ...defaultSettings.generationEnabled,
         ...(parsed.settings?.generationEnabled ?? {}),
       },
+      enablePromptCalibration:
+        typeof (parsed.settings as AppSettings | undefined)
+          ?.enablePromptCalibration === "boolean"
+          ? (parsed.settings as AppSettings).enablePromptCalibration
+          : defaultSettings.enablePromptCalibration,
+      enableEndFramePrompts:
+        typeof (parsed.settings as AppSettings | undefined)
+          ?.enableEndFramePrompts === "boolean"
+          ? (parsed.settings as AppSettings).enableEndFramePrompts
+          : defaultSettings.enableEndFramePrompts,
     },
     projects,
     globalCharacterLibrary,
@@ -559,6 +602,9 @@ export function createProject(input: ProjectInput): ProjectRecord {
     createdAt: nowIso(),
     updatedAt: nowIso(),
     ...input,
+    deliveryProfile: input.deliveryProfile ?? "short_form",
+    logline: null,
+    theme: null,
   };
 
   data.projects.push(project);
@@ -583,9 +629,41 @@ export function updateProjectStatus(
     project.statusDetail = statusDetail?.trim()
       ? statusDetail.trim()
       : "Unknown generation error";
+  } else if (status === "processing" && statusDetail !== undefined) {
+    project.statusDetail = statusDetail?.trim() ? statusDetail.trim() : null;
   } else {
     project.statusDetail = null;
   }
+  project.updatedAt = nowIso();
+  saveData();
+}
+
+/** Sub-step message while status stays `processing` (e.g. script vs calibration). */
+export function updateProjectProcessingMessage(
+  projectId: string,
+  message: string | null,
+): void {
+  const data = loadData();
+  const project = data.projects.find((item) => item.id === projectId);
+  if (!project || project.status !== "processing") {
+    return;
+  }
+  project.statusDetail = message?.trim() ? message.trim() : null;
+  project.updatedAt = nowIso();
+  saveData();
+}
+
+export function updateProjectScriptMeta(
+  projectId: string,
+  meta: { logline: string | null; theme: string | null },
+): void {
+  const data = loadData();
+  const project = data.projects.find((item) => item.id === projectId);
+  if (!project) {
+    throw new Error("Project not found");
+  }
+  project.logline = meta.logline;
+  project.theme = meta.theme;
   project.updatedAt = nowIso();
   saveData();
 }

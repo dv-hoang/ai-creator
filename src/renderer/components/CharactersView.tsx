@@ -96,6 +96,12 @@ export function CharactersView(props: {
               <h3>
                 {character.name} {t("Prompt", "Prompt")}
               </h3>
+              {character.negativeConsistency && (
+                <p className="muted" style={{ marginBottom: 8 }}>
+                  <strong>{t("Do not change", "Không đổi")}:</strong>{" "}
+                  {character.negativeConsistency}
+                </p>
+              )}
               <div className="character-layout">
                 <div className="character-preview">
                   {imageAsset ? (

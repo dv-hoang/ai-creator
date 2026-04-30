@@ -708,6 +708,36 @@ export async function generateStep1(prompt: string): Promise<Step1Response> {
   return step1Schema.parse(parsed);
 }
 
+/** Optional Step 1b: tighten continuity and prompts; same provider/model as generateScript. */
+export async function refineStep1Response(parsed: Step1Response): Promise<Step1Response> {
+  const settings = getSettings();
+  const { provider, model } = resolveTask('generateScript', settings);
+  if (provider !== 'openai' && provider !== 'gemini') {
+    throw new Error(`${provider} is currently not supported for script refinement.`);
+  }
+  const key = getKey(provider, settings);
+  const refinementPrompt = `You are a senior animation pipeline editor. You receive JSON that already matches the AI Creator Step 1 animation schema.
+
+Improve without changing the story:
+- Align character names: every string in scenes[].characters_present must match a characters[].name exactly.
+- Continuity: wardrobe, hair, age, signature props, and palette must stay consistent across scenes in image_prompt and image_to_video_prompt.
+- image_to_video_prompt: keep time-slice format; ensure full coverage from 0s through clip_duration_sec with no gaps or overlaps; clearer motion and motivated camera where possible.
+- Strengthen lighting/lens vocabulary in image_prompt where weak.
+- Preserve clip_duration_sec unless a clear error exists (then fix with minimal change).
+
+Return ONLY one JSON object using the same schema (same required keys). No markdown fences, no commentary.
+
+INPUT JSON:
+${JSON.stringify(parsed)}`;
+
+  const raw =
+    provider === 'openai'
+      ? await callOpenAiChat(model, refinementPrompt, key)
+      : await callGeminiText(model, refinementPrompt, key);
+  const out = JSON.parse(stripJsonFence(raw));
+  return step1Schema.parse(out);
+}
+
 export async function validateProvider(provider: ProviderName, apiKey?: string): Promise<ValidateProviderResult> {
   const settings = getSettings();
   const key = apiKey?.trim() || settings.providers.find((item) => item.name === provider)?.apiKey?.trim();

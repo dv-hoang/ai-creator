@@ -99,6 +99,29 @@ export function ScenesView(props: {
               </div>
               <div className="scene-editor">
                 <p>{scene.summary}</p>
+                {(scene.shotSize ||
+                  scene.ambientSound ||
+                  scene.soundEffect ||
+                  scene.dialogueCue) && (
+                  <p className="muted">
+                    {[
+                      scene.shotSize
+                        ? `${t("Shot size", "Loại cảnh")}: ${scene.shotSize}`
+                        : "",
+                      scene.ambientSound
+                        ? `${t("Ambience", "Âm nền")}: ${scene.ambientSound}`
+                        : "",
+                      scene.soundEffect
+                        ? `${t("SFX", "Hiệu ứng")}: ${scene.soundEffect}`
+                        : "",
+                      scene.dialogueCue
+                        ? `${t("Dialogue cue", "Lời thoại")}: ${scene.dialogueCue}`
+                        : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
+                )}
                 <div className="refs-highlight">
                   <strong>{t("Needs refs", "Cần ảnh tham chiếu")}</strong>
                   <div className="refs-list">

@@ -25,6 +25,32 @@ export function InfoView(props: {
             <strong>{project.statusDetail || "-"}</strong>
           </div>
         )}
+        {project.status === "processing" && project.statusDetail && (
+          <div className="info-row">
+            <span>{t("Progress", "Tiến độ")}</span>
+            <strong>{project.statusDetail}</strong>
+          </div>
+        )}
+        <div className="info-row">
+          <span>{t("Delivery profile", "Hồ sơ giao hàng")}</span>
+          <strong>
+            {project.deliveryProfile === "animation_studio"
+              ? t("Animation studio", "Phim hoạt hình / studio")
+              : t("Short form", "Nội dung ngắn / viral")}
+          </strong>
+        </div>
+        {(project.logline || project.theme) && (
+          <>
+            <div className="info-row">
+              <span>{t("Logline", "Logline")}</span>
+              <strong>{project.logline || "-"}</strong>
+            </div>
+            <div className="info-row">
+              <span>{t("Theme", "Chủ đề")}</span>
+              <strong>{project.theme || "-"}</strong>
+            </div>
+          </>
+        )}
         <div className="info-row">
           <span>{t("Prompt Language", "Ngôn ngữ prompt")}</span>
           <strong>{project.promptLanguage}</strong>
