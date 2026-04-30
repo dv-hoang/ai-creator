@@ -1,6 +1,6 @@
 {
   "name": "ai-creator",
-  "version": "v0.1.9",
+  "version": "v0.1.11",
   "packageManager": "yarn@1.22.22",
   "main": "out/main/index.js",
   "type": "module",
@@ -71,6 +71,7 @@
       "package.json"
     ],
     "mac": {
+      "notarize": false,
       "target": [
         "dmg",
         "zip"
