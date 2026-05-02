@@ -26,6 +26,7 @@ import { CreateProjectPanel } from "./components/CreateProjectPanel";
 import { InfoView } from "./components/InfoView";
 import { ScenesView } from "./components/ScenesView";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { SoloStudioView } from "./components/SoloStudioView";
 import { TranscriptView } from "./components/TranscriptView";
 
 const languageOptions = [
@@ -110,6 +111,7 @@ const emptyProjectInput: ProjectInput = {
   visualStyle: "Pixar 3D",
   artDirectionHint: "cinematic lighting",
   deliveryProfile: "short_form",
+  projectMode: "pipeline",
 };
 
 function toRenderableSrc(filePath: string): string {
@@ -147,7 +149,7 @@ export function App() {
   const [assets, setAssets] = useState<AssetRecord[]>([]);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [selectedTab, setSelectedTab] = useState<
-    "Info" | "Characters" | "Scenes" | "Transcript"
+    "Info" | "Characters" | "Scenes" | "Transcript" | "Solo"
   >("Info");
   const [projectForm, setProjectForm] =
     useState<ProjectInput>(emptyProjectInput);
@@ -324,7 +326,13 @@ export function App() {
     lastKnownProjectStatusRef.current.set(next.project.id, next.project.status);
     setWorkspace(next);
     if (options?.resetTab || next.project.status === "error") {
-      setSelectedTab("Info");
+      setSelectedTab(
+        next.project.status === "error"
+          ? "Info"
+          : (next.project.projectMode ?? "pipeline") === "solo"
+            ? "Solo"
+            : "Info",
+      );
     }
     const nextAssets = await electronApi.assets.listByProject(projectId);
     setAssets(nextAssets);
@@ -374,6 +382,19 @@ export function App() {
     if (!electronApi) return;
     void refreshProjects();
   }, [electronApi, includeArchivedProjects]);
+
+  useEffect(() => {
+    if (!workspace) return;
+    if ((workspace.project.projectMode ?? "pipeline") === "solo") {
+      if (
+        selectedTab === "Characters" ||
+        selectedTab === "Scenes" ||
+        selectedTab === "Transcript"
+      ) {
+        setSelectedTab("Solo");
+      }
+    }
+  }, [workspace?.project.id, workspace?.project.projectMode]);
 
   useEffect(() => {
     if (!electronApi) {
@@ -510,7 +531,51 @@ export function App() {
   }
 
   async function handleCreateProject() {
-    if (!electronApi) return;
+    if (!electronApi || !settings) return;
+    const mode = projectForm.projectMode ?? "pipeline";
+    if (mode === "solo") {
+      const img = settings.taskModelMappings.generateImage;
+      const vid = settings.taskModelMappings.generateVideo;
+      const imgKey =
+        img?.provider &&
+        settings.providers
+          .find((item) => item.name === img.provider)
+          ?.apiKey?.trim();
+      const vidKey =
+        vid?.provider &&
+        settings.providers
+          .find((item) => item.name === vid.provider)
+          ?.apiKey?.trim();
+      if (!imgKey && !vidKey) {
+        enqueueSnackbar(
+          t(
+            'Add an API key for "Generate Image" and/or "Generate Video" in Settings.',
+            'Thêm API key cho "Tạo ảnh" và/hoặc "Tạo video" trong Cài đặt.',
+          ),
+          { variant: "error" },
+        );
+        return;
+      }
+    } else {
+      const scriptMapping = settings.taskModelMappings.generateScript;
+      const provider = scriptMapping?.provider;
+      const model = scriptMapping?.model?.trim();
+      const providerKey = provider
+        ? settings.providers
+            .find((item) => item.name === provider)
+            ?.apiKey?.trim()
+        : "";
+      if (!provider || !model || !providerKey) {
+        enqueueSnackbar(
+          t(
+            'Configure "Generate Script" provider/model and API key in Settings.',
+            'Cấu hình provider/model "Generate Script" và API key trong Cài đặt.',
+          ),
+          { variant: "error" },
+        );
+        return;
+      }
+    }
     setBusy(true);
     enqueueSnackbar(t("Creating project...", "Đang tạo dự án..."), {
       variant: "info",
@@ -526,11 +591,17 @@ export function App() {
         created.project.id,
       );
       setAssets(nextAssets);
+      const solo = (created.project.projectMode ?? "pipeline") === "solo";
       enqueueSnackbar(
-        t(
-          "Project created. Step 1 generation is running in background.",
-          "Đã tạo dự án. Bước 1 đang được tạo ở nền.",
-        ),
+        solo
+          ? t(
+              "Solo project ready — open the Solo tab to generate.",
+              "Dự án Solo đã sẵn sàng — mở tab Solo để tạo ảnh/video.",
+            )
+          : t(
+              "Project created. Step 1 generation is running in background.",
+              "Đã tạo dự án. Bước 1 đang được tạo ở nền.",
+            ),
         { variant: "success" },
       );
     } catch (error) {
@@ -1115,6 +1186,7 @@ export function App() {
       visualStyle: project.visualStyle,
       artDirectionHint: project.artDirectionHint,
       deliveryProfile: project.deliveryProfile ?? "short_form",
+      projectMode: project.projectMode ?? "pipeline",
     });
     setActivePage("createProject");
   }
@@ -1151,27 +1223,6 @@ export function App() {
       );
       return;
     }
-
-    const scriptMapping = settings.taskModelMappings.generateScript;
-    const provider = scriptMapping?.provider;
-    const model = scriptMapping?.model?.trim();
-    const providerKey = provider
-      ? settings.providers
-          .find((item) => item.name === provider)
-          ?.apiKey?.trim()
-      : "";
-
-    if (!provider || !model || !providerKey) {
-      enqueueSnackbar(
-        t(
-          'Cannot create project: please configure "Generate Script" provider/model and API key in Settings.',
-          'Không thể tạo dự án: vui lòng cấu hình provider/model của "Generate Script" và API key trong phần Cài đặt.',
-        ),
-        { variant: "error" },
-      );
-      return;
-    }
-
     setActivePage("createProject");
   }
 
@@ -1416,7 +1467,14 @@ export function App() {
                         </div>
                       )}
                     </div>
-                    <h3>{project.title}</h3>
+                    <h3>
+                      {project.title}
+                      {(project.projectMode ?? "pipeline") === "solo" ? (
+                        <span className="pill" style={{ marginLeft: 8 }}>
+                          Solo
+                        </span>
+                      ) : null}
+                    </h3>
                     <p>{project.visualStyle}</p>
                     <small>
                       {project.aspectRatio} • {project.status}
@@ -1504,30 +1562,38 @@ export function App() {
                 <p className="muted">
                   {workspace.project.visualStyle} •{" "}
                   {workspace.project.aspectRatio}
+                  {(workspace.project.projectMode ?? "pipeline") === "solo"
+                    ? ` • ${t("Solo", "Solo")}`
+                    : ""}
                 </p>
               </div>
               <div className="inline-row tab-row">
-                {(["Info", "Characters", "Scenes", "Transcript"] as const).map(
-                  (tab) => (
-                    <button
-                      key={tab}
-                      className={`btn ${selectedTab === tab ? "active" : ""}`}
-                      onClick={() => setSelectedTab(tab)}
-                    >
-                      {tab === "Info"
-                        ? t("Info", "Thông tin")
+                {(
+                  (workspace.project.projectMode ?? "pipeline") === "solo"
+                    ? (["Info", "Solo"] as const)
+                    : (["Info", "Characters", "Scenes", "Transcript"] as const)
+                ).map((tab) => (
+                  <button
+                    key={tab}
+                    className={`btn ${selectedTab === tab ? "active" : ""}`}
+                    onClick={() => setSelectedTab(tab)}
+                  >
+                    {tab === "Info"
+                      ? t("Info", "Thông tin")
+                      : tab === "Solo"
+                        ? t("Solo", "Solo")
                         : tab === "Characters"
                           ? t("Characters", "Nhân vật")
                           : tab === "Scenes"
                             ? t("Scenes", "Cảnh")
                             : t("Transcript", "Lời thoại")}
-                    </button>
-                  ),
-                )}
+                  </button>
+                ))}
               </div>
             </header>
 
-            {workspace.project.status === "error" && (
+            {(workspace.project.projectMode ?? "pipeline") !== "solo" &&
+              workspace.project.status === "error" && (
               <div className="workspace-script-error-banner" role="alert">
                 <div className="workspace-script-error-text">
                   <strong>
@@ -1570,6 +1636,35 @@ export function App() {
 
             {selectedTab === "Info" && (
               <InfoView project={workspace.project} locale={locale} />
+            )}
+
+            {selectedTab === "Solo" && settings && (
+              <SoloStudioView
+                locale={locale}
+                projectId={workspace.project.id}
+                settings={settings}
+                assets={assets}
+                electronApi={electronApi}
+                busy={busy}
+                setBusy={setBusy}
+                canGenerateImage={canGenerateImage}
+                canGenerateVideo={canGenerateVideo}
+                getModelsForTask={(task, provider) =>
+                  getCompatibleModelsForTask(
+                    task,
+                    provider,
+                    settings.providerModels[provider] ?? [],
+                    settings.falModelCategories,
+                  )
+                }
+                onRefreshWorkspace={async () => {
+                  await refreshWorkspace(workspace.project.id);
+                }}
+                toRenderableSrc={toRenderableSrc}
+                onOpenLightbox={(src, alt) =>
+                  setLightboxImage({ src, alt })
+                }
+              />
             )}
 
             {selectedTab === "Characters" && (

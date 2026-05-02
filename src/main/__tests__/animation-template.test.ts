@@ -21,6 +21,19 @@ describe('templates/animation.md', () => {
   });
 });
 
+describe('templates/storyboard.md', () => {
+  test('defines composite storyboard T2I and sheet-wide I2V contract', () => {
+    const content = readFileSync(join(process.cwd(), 'templates', 'storyboard.md'), 'utf8');
+    expect(content).toContain('{PROFILE_BODY}');
+    expect(content).toContain('{DELIVERY_PROFILE}');
+    expect(content).toContain('storyboard_image_prompt');
+    expect(content).toContain('image_to_video_prompt');
+    expect(content).toContain('"characters"');
+    expect(content).toContain('"panels"');
+    expect(content).not.toContain('"scenes"');
+  });
+});
+
 describe('templates/profile bodies', () => {
   test('short profile keeps viral hook blueprint', () => {
     const content = readFileSync(join(process.cwd(), 'templates', 'profile-short.md'), 'utf8');

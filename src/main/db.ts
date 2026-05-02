@@ -1,7 +1,15 @@
 import { app } from "electron";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, extname, join, relative, resolve as resolvePath } from "node:path";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { providerApiKeyFingerprint } from "../shared/providerValidation";
 import type {
@@ -98,6 +106,7 @@ function normalizeProjectRecord(project: ProjectRecord): ProjectRecord {
   return {
     ...project,
     deliveryProfile: project.deliveryProfile ?? "short_form",
+    projectMode: project.projectMode ?? "pipeline",
     logline: project.logline ?? null,
     theme: project.theme ?? null,
     statusDetail: normalizedStatusDetail,
@@ -643,15 +652,18 @@ export function saveSettings(settings: AppSettings): AppSettings {
 
 export function createProject(input: ProjectInput): ProjectRecord {
   const data = loadData();
+  const projectMode = input.projectMode ?? "pipeline";
+  const isSolo = projectMode === "solo";
   const project: ProjectRecord = {
     id: randomUUID(),
-    status: "processing",
+    status: isSolo ? "ready" : "processing",
     statusDetail: null,
     archivedAt: null,
     createdAt: nowIso(),
     updatedAt: nowIso(),
     ...input,
     deliveryProfile: input.deliveryProfile ?? "short_form",
+    projectMode,
     logline: null,
     theme: null,
   };
@@ -1067,6 +1079,75 @@ export function getProjectAssetsDir(projectId: string): string {
   const directory = join(getProjectDataDir(projectId), "assets");
   mkdirSync(directory, { recursive: true });
   return directory;
+}
+
+/** User-uploaded reference images for Solo Mode (image/video generation). */
+export function getSoloUploadedReferencesDir(projectId: string): string {
+  const directory = join(getProjectAssetsDir(projectId), "uploaded-references");
+  mkdirSync(directory, { recursive: true });
+  return directory;
+}
+
+export function listSoloUploadedReferencePaths(projectId: string): string[] {
+  const dir = getSoloUploadedReferencesDir(projectId);
+  try {
+    return readdirSync(dir)
+      .filter((name) => /\.(png|jpe?g|webp|gif|bmp)$/i.test(name))
+      .map((name) => join(dir, name))
+      .filter((p) => existsSync(p))
+      .sort((a, b) => a.localeCompare(b));
+  } catch {
+    return [];
+  }
+}
+
+export function importSoloUploadedReferences(
+  projectId: string,
+  sourcePaths: string[],
+): string[] {
+  const destDir = getSoloUploadedReferencesDir(projectId);
+  const out: string[] = [];
+  for (const src of sourcePaths) {
+    if (!src?.trim() || !existsSync(src)) {
+      continue;
+    }
+    const ext = extname(src) || ".png";
+    const dest = join(destDir, `ref-${randomUUID()}${ext}`);
+    copyFileSync(src, dest);
+    out.push(dest);
+  }
+  return out;
+}
+
+export function removeSoloUploadedReference(
+  projectId: string,
+  absolutePath: string,
+): void {
+  const root = resolvePath(getSoloUploadedReferencesDir(projectId));
+  const target = resolvePath(absolutePath.trim());
+  const rel = relative(root, target);
+  if (rel.startsWith("..") || rel === "") {
+    throw new Error("Invalid reference path for this project.");
+  }
+  if (existsSync(target)) {
+    unlinkSync(target);
+  }
+}
+
+/** Ensures the path is under this project's `uploaded-references` directory and exists. */
+export function assertSoloUploadedReferenceInProject(
+  projectId: string,
+  absolutePath: string,
+): void {
+  const root = resolvePath(getSoloUploadedReferencesDir(projectId));
+  const target = resolvePath(absolutePath.trim());
+  const rel = relative(root, target);
+  if (rel.startsWith("..") || rel === "") {
+    throw new Error("Invalid reference path for this project.");
+  }
+  if (!existsSync(target)) {
+    throw new Error("Reference file not found.");
+  }
 }
 
 export function ensureDirForFile(filePath: string): void {

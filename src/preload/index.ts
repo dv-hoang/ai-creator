@@ -50,6 +50,16 @@ const api: ElectronApi = {
     updateSpeakerVoice: (projectId, speaker, voiceId) =>
       ipcRenderer.invoke('transcript:updateSpeakerVoice', projectId, speaker, voiceId)
   },
+  solo: {
+    listReferenceImages: (projectId) =>
+      ipcRenderer.invoke('solo:listReferenceImages', projectId),
+    addReferenceImages: (projectId) =>
+      ipcRenderer.invoke('solo:addReferenceImages', projectId),
+    removeReferenceImage: (projectId, absolutePath) =>
+      ipcRenderer.invoke('solo:removeReferenceImage', projectId, absolutePath),
+    generateImage: (payload) => ipcRenderer.invoke('solo:generateImage', payload),
+    generateVideo: (payload) => ipcRenderer.invoke('solo:generateVideo', payload)
+  },
   app: {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
     openExternal: (url) => ipcRenderer.invoke('app:openExternal', url),

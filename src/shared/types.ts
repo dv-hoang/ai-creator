@@ -5,6 +5,9 @@ export type GenerationTask = 'generateScript' | 'generateImage' | 'generateVideo
 /** Step-1 script style: short-form viral vs professional animation pacing. */
 export type DeliveryProfile = 'short_form' | 'animation_studio';
 
+/** `pipeline` = script/characters/scenes/tts; `solo` = manual prompts, image/video only. */
+export type ProjectMode = 'pipeline' | 'solo';
+
 export interface ProviderConfig {
   name: ProviderName;
   apiKey: string;
@@ -53,6 +56,7 @@ export interface ProjectInput {
   visualStyle: string;
   artDirectionHint: string;
   deliveryProfile: DeliveryProfile;
+  projectMode?: ProjectMode;
 }
 
 export interface ProjectRecord extends ProjectInput {
@@ -123,7 +127,7 @@ export interface TranscriptRow {
 }
 
 export type AssetKind = 'image' | 'video' | 'audio' | 'srt' | 'text';
-export type AssetEntityType = 'character' | 'scene' | 'video' | 'transcript';
+export type AssetEntityType = 'character' | 'scene' | 'video' | 'transcript' | 'solo';
 
 export interface AssetRecord {
   id: string;
@@ -312,6 +316,27 @@ export interface ElectronApi {
       speaker: string,
       voiceId: string,
     ): Promise<number>;
+  };
+  solo: {
+    listReferenceImages(projectId: string): Promise<string[]>;
+    addReferenceImages(projectId: string): Promise<string[]>;
+    removeReferenceImage(projectId: string, absolutePath: string): Promise<void>;
+    generateImage(payload: {
+      projectId: string;
+      prompt: string;
+      referencePaths?: string[];
+      taskMapping?: TaskModelMapping;
+    }): Promise<GenerationResult>;
+    generateVideo(payload: {
+      projectId: string;
+      prompt: string;
+      /** Use a generated image asset from this project as the first frame. */
+      firstFrameAssetId?: string;
+      /** Or use an uploaded Solo reference file path (under project uploads). */
+      firstFrameReferencePath?: string;
+      referenceImagePaths?: string[];
+      taskMapping?: TaskModelMapping;
+    }): Promise<GenerationResult>;
   };
   app: {
     getVersion(): Promise<string>;

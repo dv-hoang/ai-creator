@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   copyFileSync,
+  existsSync,
   mkdirSync,
   readFileSync,
   renameSync,
@@ -11,12 +12,14 @@ import { basename, dirname, extname, join, resolve as resolvePath } from "node:p
 import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
 import { createFalClient } from "@fal-ai/client";
 import { GoogleGenAI } from "@google/genai";
+import { falFluxReferencesForGenerateImage } from "../shared/falFluxImageGeneration";
 import { falModelsForGenerationTask } from "../shared/falModelFilters";
 import type {
   AppSettings,
   GenerationTask,
   ProviderName,
   Step1Response,
+  TaskModelMapping,
   ValidateProviderResult,
 } from "@shared/types";
 import {
@@ -87,6 +90,14 @@ function resolveTask(
   settings: AppSettings,
 ): { provider: ProviderName; model: string } {
   return settings.taskModelMappings[task];
+}
+
+function resolveTaskMapping(
+  task: GenerationTask,
+  settings: AppSettings,
+  override?: TaskModelMapping,
+): { provider: ProviderName; model: string } {
+  return override ?? resolveTask(task, settings);
 }
 
 function getCompatibleVideoModelsForProvider(
@@ -1274,10 +1285,12 @@ export async function listProviderModels(
 
 export async function generateImage(options: {
   projectId: string;
-  entityType: "character" | "scene";
+  entityType: "character" | "scene" | "solo";
   entityId: string;
   prompt: string;
   references?: string[];
+  /** Per-call provider/model (e.g. Solo workspace picker). */
+  taskMapping?: TaskModelMapping;
 }): Promise<{
   provider: ProviderName;
   model: string;
@@ -1285,13 +1298,22 @@ export async function generateImage(options: {
   metadataJson: string;
 }> {
   const settings = getSettings();
-  const mapping = resolveTask("generateImage", settings);
+  const mapping = resolveTaskMapping(
+    "generateImage",
+    settings,
+    options.taskMapping,
+  );
   const outputDir = getProjectAssetsDir(options.projectId);
   const outputPathWithoutExt = join(
     outputDir,
     `${options.entityType}-${options.entityId}-${Date.now()}`,
   );
   const key = getKey(mapping.provider, settings);
+
+  const falRefs = falFluxReferencesForGenerateImage(
+    options.entityType,
+    options.references,
+  );
 
   const generated =
     mapping.provider === "openai"
@@ -1307,7 +1329,7 @@ export async function generateImage(options: {
             options.prompt,
             key,
             outputPathWithoutExt,
-            options.references ?? [],
+            falRefs,
           )
         : mapping.provider === "gemini"
           ? await geminiGenerateImage(
@@ -1344,9 +1366,18 @@ export async function generateVideoFromImage(options: {
   projectId: string;
   sceneId: string;
   prompt: string;
-  firstFrameAssetId: string;
+  /** Use DB asset as first frame (standard scene / solo generated image). */
+  firstFrameAssetId?: string;
+  /**
+   * Absolute path to a first-frame image (e.g. Solo uploaded reference).
+   * Mutually exclusive with `firstFrameAssetId` for frame resolution.
+   */
+  firstFrameSourcePath?: string;
   /** Character reference images for providers that support extras (fal Flux i2v). */
   referenceImagePaths?: string[];
+  taskMapping?: TaskModelMapping;
+  /** Solo workspace uses stable file prefixes instead of scene ids. */
+  outputVariant?: "scene" | "solo";
 }): Promise<{
   provider: ProviderName;
   model: string;
@@ -1354,19 +1385,34 @@ export async function generateVideoFromImage(options: {
   metadataJson: string;
 }> {
   const settings = getSettings();
-  const mapping = resolveTask("generateVideo", settings);
-  const outputDir = getProjectAssetsDir(options.projectId);
-  const sourceAsset = getAsset(options.firstFrameAssetId);
-  const extension = sourceAsset.filePath.split(".").pop() || "bin";
-  const copiedFrame = join(
-    outputDir,
-    `scene-${options.sceneId}-first-frame.${extension}`,
+  const mapping = resolveTaskMapping(
+    "generateVideo",
+    settings,
+    options.taskMapping,
   );
-  copyFileSync(sourceAsset.filePath, copiedFrame);
+  const outputDir = getProjectAssetsDir(options.projectId);
+  let frameDiskPath: string;
+  if (options.firstFrameSourcePath?.trim()) {
+    frameDiskPath = resolvePath(options.firstFrameSourcePath.trim());
+    if (!existsSync(frameDiskPath)) {
+      throw new Error("First-frame image file not found.");
+    }
+  } else if (options.firstFrameAssetId?.trim()) {
+    frameDiskPath = getAsset(options.firstFrameAssetId).filePath;
+  } else {
+    throw new Error("Provide firstFrameAssetId or firstFrameSourcePath for video generation.");
+  }
+  const extension = frameDiskPath.split(".").pop() || "bin";
+  const pathStem =
+    options.outputVariant === "solo"
+      ? `solo-${options.projectId}`
+      : `scene-${options.sceneId}`;
+  const copiedFrame = join(outputDir, `${pathStem}-first-frame.${extension}`);
+  copyFileSync(frameDiskPath, copiedFrame);
   const key = getKey(mapping.provider, settings);
   const outputPathWithoutExt = join(
     outputDir,
-    `scene-${options.sceneId}-video-${randomUUID()}`,
+    `${pathStem}-video-${randomUUID()}`,
   );
 
   if (
@@ -1452,7 +1498,8 @@ export async function generateVideoFromImage(options: {
     filePath: generated.filePath,
     metadataJson: JSON.stringify({
       prompt: options.prompt,
-      firstFrameAssetId: options.firstFrameAssetId,
+      firstFrameAssetId: options.firstFrameAssetId ?? null,
+      firstFrameSourcePath: options.firstFrameSourcePath?.trim() ?? null,
       references: options.referenceImagePaths ?? [],
       providerMetadata: generated.metadata,
     }),

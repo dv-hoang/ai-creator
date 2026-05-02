@@ -1,4 +1,4 @@
-import type { DeliveryProfile, ProjectInput } from "@shared/types";
+import type { DeliveryProfile, ProjectInput, ProjectMode } from "@shared/types";
 import visualStyleGridImage from "../../assets/visual-styles/style-grid.png";
 
 const promptLanguageOptions = ["English", "Vietnamese"] as const;
@@ -10,6 +10,33 @@ const aspectRatioPresets = [
   { value: "3:4", width: 3, height: 4 },
   { value: "21:9", width: 21, height: 9 },
 ] as const;
+const projectModeOptions: {
+  value: ProjectMode;
+  en: string;
+  vi: string;
+  hintEn: string;
+  hintVi: string;
+}[] = [
+  {
+    value: "pipeline",
+    en: "Story pipeline",
+    vi: "Pipeline kịch bản",
+    hintEn:
+      "Generates script, characters, scenes, and transcript (Step 1). Use when you have story content.",
+    hintVi:
+      "Tự động tạo kịch bản, nhân vật, cảnh và lời thoại (Bước 1). Dùng khi có nội dung chuyện.",
+  },
+  {
+    value: "solo",
+    en: "Solo Mode",
+    vi: "Chế độ Solo",
+    hintEn:
+      "Skip script and timeline. You write prompts and generate images/videos with optional reference uploads.",
+    hintVi:
+      "Bỏ qua kịch bản và timeline. Bạn tự nhập prompt và tạo ảnh/video, có thể tải ảnh tham chiếu.",
+  },
+];
+
 const deliveryProfileOptions: { value: DeliveryProfile; en: string; vi: string }[] = [
   {
     value: "short_form",
@@ -75,8 +102,37 @@ export function CreateProjectPanel(props: {
     <section className="create-project-view panel">
       <div className="section-head">
         <h2>{t("Create Project", "Tạo dự án")}</h2>
-        <span className="pill">{t("Step 1 Setup", "Thiết lập Bước 1")}</span>
+        <span className="pill">
+          {props.projectForm.projectMode === "solo"
+            ? t("Solo setup", "Thiết lập Solo")
+            : t("Step 1 Setup", "Thiết lập Bước 1")}
+        </span>
       </div>
+      <label>
+        {t("Project mode", "Chế độ dự án")}
+        <select
+          value={props.projectForm.projectMode ?? "pipeline"}
+          onChange={(event) =>
+            props.setProjectForm({
+              ...props.projectForm,
+              projectMode: event.target.value as ProjectMode,
+            })
+          }
+        >
+          {projectModeOptions.map((option) => (
+            <option key={option.value} value={option.value}>
+              {t(option.en, option.vi)}
+            </option>
+          ))}
+        </select>
+        <span className="muted" style={{ display: "block", marginTop: 6 }}>
+          {(() => {
+            const mode = props.projectForm.projectMode ?? "pipeline";
+            const row = projectModeOptions.find((o) => o.value === mode);
+            return row ? t(row.hintEn, row.hintVi) : "";
+          })()}
+        </span>
+      </label>
       <label>
         {t("Title", "Tiêu đề")}
         <input
@@ -89,43 +145,47 @@ export function CreateProjectPanel(props: {
           }
         />
       </label>
-      <label>
-        {t("Delivery profile", "Hồ sơ giao hàng")}
-        <select
-          value={props.projectForm.deliveryProfile}
-          onChange={(event) =>
-            props.setProjectForm({
-              ...props.projectForm,
-              deliveryProfile: event.target.value as DeliveryProfile,
-            })
-          }
-        >
-          {deliveryProfileOptions.map((option) => (
-            <option key={option.value} value={option.value}>
-              {t(option.en, option.vi)}
-            </option>
-          ))}
-        </select>
-        <span className="muted" style={{ display: "block", marginTop: 6 }}>
-          {t(
-            "Controls Step 1 instructions: short-form hooks vs. calmer professional animation pacing.",
-            "Điều khiển hướng dẫn Bước 1: hook dạng ngắn so với nhịp phim hoạt hình chuyên nghiệp điềm hơn.",
-          )}
-        </span>
-      </label>
-      <label>
-        {t("Content", "Nội dung")}
-        <textarea
-          value={props.projectForm.originalContent}
-          rows={8}
-          onChange={(event) =>
-            props.setProjectForm({
-              ...props.projectForm,
-              originalContent: event.target.value,
-            })
-          }
-        />
-      </label>
+      {(props.projectForm.projectMode ?? "pipeline") === "pipeline" ? (
+        <>
+          <label>
+            {t("Delivery profile", "Hồ sơ giao hàng")}
+            <select
+              value={props.projectForm.deliveryProfile}
+              onChange={(event) =>
+                props.setProjectForm({
+                  ...props.projectForm,
+                  deliveryProfile: event.target.value as DeliveryProfile,
+                })
+              }
+            >
+              {deliveryProfileOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {t(option.en, option.vi)}
+                </option>
+              ))}
+            </select>
+            <span className="muted" style={{ display: "block", marginTop: 6 }}>
+              {t(
+                "Controls Step 1 instructions: short-form hooks vs. calmer professional animation pacing.",
+                "Điều khiển hướng dẫn Bước 1: hook dạng ngắn so với nhịp phim hoạt hình chuyên nghiệp điềm hơn.",
+              )}
+            </span>
+          </label>
+          <label>
+            {t("Content", "Nội dung")}
+            <textarea
+              value={props.projectForm.originalContent}
+              rows={8}
+              onChange={(event) =>
+                props.setProjectForm({
+                  ...props.projectForm,
+                  originalContent: event.target.value,
+                })
+              }
+            />
+          </label>
+        </>
+      ) : null}
       <div className="two-col">
         <label>
           {t("Prompt Language", "Ngôn ngữ prompt")}
@@ -286,7 +346,8 @@ export function CreateProjectPanel(props: {
           disabled={
             props.busy ||
             !props.projectForm.title ||
-            !props.projectForm.originalContent
+            ((props.projectForm.projectMode ?? "pipeline") === "pipeline" &&
+              !props.projectForm.originalContent)
           }
         >
           {t("Create", "Tạo")}

@@ -21,7 +21,8 @@ import type {
   ProjectRecord,
   ProviderName,
   Scene,
-  Step1Response
+  Step1Response,
+  TaskModelMapping
 } from '@shared/types';
 import {
   createProject,
@@ -39,7 +40,11 @@ import {
   getWorkspace,
   initDb,
   linkCharacterAsset,
+  assertSoloUploadedReferenceInProject,
+  importSoloUploadedReferences,
   listProjects,
+  listSoloUploadedReferencePaths,
+  removeSoloUploadedReference,
   resetProjectWorkspaceForRegeneration,
   saveAsset,
   saveCharacters,
@@ -508,12 +513,17 @@ export function registerIpc(): void {
   bind('projects:getWorkspace', (projectId) => getWorkspace(projectId));
   bind('projects:create', async (input: ProjectInput) => {
     const project = createProject(input);
-    runStep1ScriptPipeline(project);
+    if ((input.projectMode ?? 'pipeline') !== 'solo') {
+      runStep1ScriptPipeline(project);
+    }
     return getWorkspace(project.id);
   });
 
   bind('projects:retryGenerateScript', async (projectId: string) => {
     const project = getProject(projectId);
+    if ((project.projectMode ?? 'pipeline') === 'solo') {
+      throw new Error('Solo projects do not use script generation.');
+    }
     if (project.status !== 'error') {
       throw new Error(
         'Script regeneration is only available when the project is in the error state.'
@@ -926,5 +936,145 @@ export function registerIpc(): void {
   );
   bind('transcript:updateSpeakerVoice', (projectId: string, speaker: string, voiceId: string) =>
     updateTranscriptVoiceBySpeaker(projectId, speaker, voiceId)
+  );
+
+  bind('solo:listReferenceImages', (projectId: string) => {
+    getProject(projectId);
+    return listSoloUploadedReferencePaths(projectId);
+  });
+
+  bind('solo:addReferenceImages', async (projectId: string) => {
+    getProject(projectId);
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        {
+          name: 'Images',
+          extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp']
+        }
+      ]
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return [];
+    }
+    return importSoloUploadedReferences(projectId, result.filePaths);
+  });
+
+  bind('solo:removeReferenceImage', (projectId: string, absolutePath: string) => {
+    removeSoloUploadedReference(projectId, absolutePath);
+  });
+
+  bind(
+    'solo:generateImage',
+    async (payload: {
+      projectId: string;
+      prompt: string;
+      referencePaths?: string[];
+      taskMapping?: TaskModelMapping;
+    }) => {
+      const project = getProject(payload.projectId);
+      if ((project.projectMode ?? 'pipeline') !== 'solo') {
+        throw new Error('This action is only for Solo projects.');
+      }
+      const trimmed = payload.prompt?.trim();
+      if (!trimmed) {
+        throw new Error('Prompt is required.');
+      }
+      const refPaths =
+        payload.referencePaths !== undefined
+          ? payload.referencePaths
+          : listSoloUploadedReferencePaths(payload.projectId);
+      const generated = await generateImage({
+        projectId: payload.projectId,
+        entityType: 'solo',
+        entityId: payload.projectId,
+        prompt: withProjectContext(trimmed, {
+          aspectRatio: project.aspectRatio,
+          visualStyle: project.visualStyle,
+          artDirectionHint: project.artDirectionHint
+        }),
+        references: refPaths,
+        taskMapping: payload.taskMapping
+      });
+      const asset = saveAsset({
+        projectId: payload.projectId,
+        entityType: 'solo',
+        entityId: payload.projectId,
+        kind: 'image',
+        filePath: generated.filePath,
+        provider: generated.provider,
+        model: generated.model,
+        metadataJson: generated.metadataJson
+      });
+      return { jobId: randomUUID(), asset };
+    }
+  );
+
+  bind(
+    'solo:generateVideo',
+    async (payload: {
+      projectId: string;
+      prompt: string;
+      firstFrameAssetId?: string;
+      firstFrameReferencePath?: string;
+      referenceImagePaths?: string[];
+      taskMapping?: TaskModelMapping;
+    }) => {
+      const project = getProject(payload.projectId);
+      if ((project.projectMode ?? 'pipeline') !== 'solo') {
+        throw new Error('This action is only for Solo projects.');
+      }
+      const trimmed = payload.prompt?.trim();
+      if (!trimmed) {
+        throw new Error('Prompt is required.');
+      }
+      const hasAssetId = Boolean(payload.firstFrameAssetId?.trim());
+      const hasRefPath = Boolean(payload.firstFrameReferencePath?.trim());
+      if (hasAssetId === hasRefPath) {
+        throw new Error(
+          'Provide exactly one of firstFrameAssetId or firstFrameReferencePath.'
+        );
+      }
+      if (hasAssetId) {
+        const assetRecord = getAsset(payload.firstFrameAssetId!);
+        if (assetRecord.projectId !== payload.projectId) {
+          throw new Error('First-frame asset does not belong to this project.');
+        }
+      } else {
+        assertSoloUploadedReferenceInProject(
+          payload.projectId,
+          payload.firstFrameReferencePath!
+        );
+      }
+      const refPaths =
+        payload.referenceImagePaths !== undefined
+          ? payload.referenceImagePaths
+          : listSoloUploadedReferencePaths(payload.projectId);
+      const generated = await generateVideoFromImage({
+        projectId: payload.projectId,
+        sceneId: payload.projectId,
+        prompt: withProjectContext(trimmed, {
+          aspectRatio: project.aspectRatio,
+          visualStyle: project.visualStyle,
+          artDirectionHint: project.artDirectionHint
+        }),
+        firstFrameAssetId: hasAssetId ? payload.firstFrameAssetId : undefined,
+        firstFrameSourcePath: hasRefPath ? payload.firstFrameReferencePath : undefined,
+        referenceImagePaths: refPaths,
+        taskMapping: payload.taskMapping,
+        outputVariant: 'solo'
+      });
+      const asset = saveAsset({
+        projectId: payload.projectId,
+        entityType: 'solo',
+        entityId: payload.projectId,
+        kind: 'video',
+        filePath: generated.filePath,
+        provider: generated.provider,
+        model: generated.model,
+        metadataJson: generated.metadataJson
+      });
+      return { jobId: randomUUID(), asset };
+    }
   );
 }
